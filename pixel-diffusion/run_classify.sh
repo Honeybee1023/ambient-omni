@@ -7,17 +7,13 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
 #SBATCH --job-name=classify_wolves
-#SBATCH --output=/afs/csail.mit.edu/u/h/honjar/ambient-omni/pixel-diffusion/classify_wolves_%j.out
+#SBATCH --output=/data/scratch/honjar/ambient-omni/pixel-diffusion/classify_wolves_%j.out
 
 echo "Job started on $(hostname)"
-echo "Working directory: $(pwd)"
 
-eval "$(~/miniconda3/bin/conda shell.bash hook)"
-conda activate ambient
+export PATH=/data/scratch/honjar/miniconda3/envs/ambient/bin:$PATH
+export PYTHONPATH=/data/scratch/honjar/ambient-omni/pixel-diffusion
 
-echo "Python: $(which python)"
-echo "CUDA available: $(python -c 'import torch; print(torch.cuda.is_available())')"
-
-cd ~/ambient-omni/pixel-diffusion
+cd /data/scratch/honjar/ambient-omni/pixel-diffusion
 python classify_wolves.py
 echo "Exit code: $?"

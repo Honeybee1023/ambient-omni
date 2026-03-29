@@ -11,8 +11,8 @@ from transformers import CLIPProcessor, CLIPModel
 from tqdm import tqdm
 
 # Config
-WILD_DIR = os.path.expanduser("~/data/afhq/afhq/train/wild")
-OUTPUT_DIR = os.path.expanduser("~/data/afhq_classified")
+WILD_DIR = "/data/scratch/honjar/afhq/afhq/train/wild"
+OUTPUT_DIR = "/data/scratch/honjar/afhq_classified"
 THRESHOLD = 0.5  # minimum probability to be classified as wolf
 BATCH_SIZE = 32
 
