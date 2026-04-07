@@ -36,9 +36,9 @@ mkdir -p /data/scratch/honjar/train_outputs
 
 cd /data/scratch/honjar/ambient-omni/pixel-diffusion
 
-# --- Auto-resume logic (FIXED: searches ALL matching dirs, not just the last one) ---
+# --- Auto-resume logic (FIXED: sort by kimg in filename, not modification time) ---
 RESUME_FLAG=""
-LATEST_STATE=$(ls -t /data/scratch/honjar/train_outputs/*-${DATASET_NAME}-*/training-state-*.pt 2>/dev/null | head -1)
+LATEST_STATE=$(ls /data/scratch/honjar/train_outputs/*-${DATASET_NAME}-*/training-state-*.pt 2>/dev/null | while read f; do echo "$(basename $f) $f"; done | sort | tail -1 | awk '{print $2}')
 if [ -n "$LATEST_STATE" ]; then
     echo "Resuming from: $LATEST_STATE"
     RESUME_FLAG="--resume=$LATEST_STATE"
