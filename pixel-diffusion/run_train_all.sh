@@ -1,12 +1,4 @@
 #!/bin/bash
-#
-# Usage: sbatch run_train_all.sh <dataset_name>
-# Example: sbatch run_train_all.sh baseline_wolves_only
-#
-# Trains an unconditional diffusion model on the specified dataset.
-# Saves model snapshots and training states every 500 kimg (--snap=10, --dump=10).
-# Max runtime: 24 hours. Auto-requeues on preemption and resumes from latest state.
-
 #SBATCH --partition=csail-shared-h200
 #SBATCH --qos=shared-if-available
 #SBATCH --nodes=1
@@ -44,20 +36,14 @@ mkdir -p /data/scratch/honjar/train_outputs
 
 cd /data/scratch/honjar/ambient-omni/pixel-diffusion
 
-# --- Auto-resume logic ---
-# Look for an existing run directory for this dataset and find the latest training state.
+# --- Auto-resume logic (FIXED: searches ALL matching dirs, not just the last one) ---
 RESUME_FLAG=""
-RUN_DIR=$(ls -d /data/scratch/honjar/train_outputs/*-${DATASET_NAME}-* 2>/dev/null | tail -1)
-if [ -n "$RUN_DIR" ]; then
-    LATEST_STATE=$(ls -t "$RUN_DIR"/training-state-*.pt 2>/dev/null | head -1)
-    if [ -n "$LATEST_STATE" ]; then
-        echo "Resuming from: $LATEST_STATE"
-        RESUME_FLAG="--resume=$LATEST_STATE"
-    else
-        echo "Found run dir $RUN_DIR but no training states. Starting fresh."
-    fi
+LATEST_STATE=$(ls -t /data/scratch/honjar/train_outputs/*-${DATASET_NAME}-*/training-state-*.pt 2>/dev/null | head -1)
+if [ -n "$LATEST_STATE" ]; then
+    echo "Resuming from: $LATEST_STATE"
+    RESUME_FLAG="--resume=$LATEST_STATE"
 else
-    echo "No existing run directory found. Starting fresh."
+    echo "No training states found. Starting fresh."
 fi
 
 echo "Job started on $(hostname)"
