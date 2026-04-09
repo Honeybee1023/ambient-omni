@@ -117,13 +117,50 @@ def compute_pickscore(image_paths, model, processor, prompt, device, batch_size=
 # ============================================================
 # 3. VENDI SCORE
 # ============================================================
+# New compute_vendi_score that works with torchvision >= 0.21
 def compute_vendi_score(image_paths, device, max_images=1000):
-    """Compute Vendi diversity score for a set of images."""
-    from vendi_score import image_utils
+    """Compute Vendi diversity score using Inception embeddings."""
+    import torchvision.models as models
+    import torchvision.transforms as transforms
+    from vendi_score import vendi
 
-    images = [Image.open(p).convert("RGB") for p in image_paths[:max_images]]
-    print(f"  Vendi: computing on {len(images)} images...")
-    vs = image_utils.embedding_vendi_score(images, device=device, batch_size=64)
+    # Load Inception v3 with new-style weights API
+    weights = models.Inception_V3_Weights.IMAGENET1K_V1
+    model = models.inception_v3(weights=weights)
+
+    # Replace final layer with identity to get pool-2048 embeddings
+    model.fc = torch.nn.Identity()
+    model.eval().to(device)
+
+    preprocess = transforms.Compose([
+        transforms.Resize(299),
+        transforms.CenterCrop(299),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225]),
+    ])
+
+    paths = image_paths[:max_images]
+    print(f"  Vendi: computing embeddings for {len(paths)} images...")
+
+    all_embs = []
+    batch_size = 64
+    for i in range(0, len(paths), batch_size):
+        batch = [preprocess(Image.open(p).convert("RGB")) for p in paths[i:i+batch_size]]
+        batch_tensor = torch.stack(batch).to(device)
+        with torch.no_grad():
+            embs = model(batch_tensor)
+        all_embs.append(embs.cpu())
+
+    X = torch.cat(all_embs, dim=0).numpy()
+
+    # Normalize embeddings, compute cosine similarity kernel
+    norms = np.linalg.norm(X, axis=1, keepdims=True)
+    X_norm = X / (norms + 1e-8)
+    K = X_norm @ X_norm.T
+
+    print(f"  Vendi: computing score from {K.shape[0]}x{K.shape[1]} similarity matrix...")
+    vs = vendi.score_K(K)
     return vs
 
 
