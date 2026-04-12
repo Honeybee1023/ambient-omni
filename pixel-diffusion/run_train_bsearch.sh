@@ -2,7 +2,7 @@
 #SBATCH --partition=csail-shared-h200
 #SBATCH --qos=shared-if-available
 #SBATCH --nodes=1
-#SBATCH --time=0-06:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
@@ -47,11 +47,12 @@ python -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
     --arch=ddpmpp \
     --batch=64 \
     --tick=50 \
-    --snap=10 \
-    --dump=10 \
+    --snap=5 \
+    --dump=5 \
     --corruption_probability=0.0 \
-    --noise_config=noise_configs/identity \
+    --noise_config=identity \
     --s_max=4 \
+    --cache=False \
     --duration=1 \
     $RESUME_FLAG
 
