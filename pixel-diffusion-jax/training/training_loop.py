@@ -76,6 +76,25 @@ def _load_network(network_kwargs, dataset_obj):
         img_channels=dataset_obj.num_channels,
         label_dim=dataset_obj.label_dim,
     )
+    model_kwargs = network_kwargs.pop("model_kwargs", None)
+    if model_kwargs is None:
+        model_keys = {
+            "model_channels",
+            "channel_mult",
+            "channel_mult_emb",
+            "num_blocks",
+            "attn_resolutions",
+            "dropout",
+            "label_dropout",
+            "embedding_type",
+            "channel_mult_noise",
+            "encoder_type",
+            "decoder_type",
+            "resample_filter",
+            "augment_dim",
+        }
+        model_kwargs = {k: network_kwargs.pop(k) for k in list(network_kwargs.keys()) if k in model_keys}
+    network_kwargs["model_kwargs"] = model_kwargs
     model = model_cls(**interface_kwargs, **network_kwargs)
     return model
 
@@ -93,6 +112,18 @@ def _create_optimizer(optimizer_kwargs, clip):
         txs.append(optax.add_decayed_weights(weight_decay))
     txs.append(optax.adam(learning_rate=lr, b1=betas[0], b2=betas[1], eps=eps))
     return optax.chain(*txs)
+
+
+def _to_jsonable(value):
+    if isinstance(value, dict):
+        return {str(k): _to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_jsonable(v) for v in value]
+    if isinstance(value, (np.generic,)):
+        return value.item()
+    if isinstance(value, Path):
+        return str(value)
+    return value
 
 
 def _build_batch(dataset_item, annotations, dataset_sampler, augment_pipe=None, crop_size=None):
@@ -269,6 +300,26 @@ def training_loop(
     loss_obj = _resolve_class(loss_kwargs.get("class_name", "training.loss.AmbientEDMLoss"))(**{k: v for k, v in loss_kwargs.items() if k != "class_name"})
     tx = _create_optimizer(optimizer_kwargs, clip)
     augment_pipe = _load_original_augment_pipe()(**augment_kwargs) if augment_kwargs is not None else None
+
+    if get_rank() == 0:
+        os.makedirs(run_dir, exist_ok=True)
+        with open(os.path.join(run_dir, "config.json"), "w") as f:
+            json.dump(
+                {
+                    "network_kwargs": _to_jsonable(network_kwargs),
+                    "loss_kwargs": _to_jsonable(loss_kwargs),
+                    "optimizer_kwargs": _to_jsonable(optimizer_kwargs),
+                    "dataset_kwargs": _to_jsonable(dataset_kwargs),
+                    "batch_size": batch_size,
+                    "ema_halflife_kimg": ema_halflife_kimg,
+                    "lr_rampup_kimg": lr_rampup_kimg,
+                    "loss_scaling": loss_scaling,
+                    "clip": clip,
+                    "augment_kwargs": _to_jsonable(augment_kwargs),
+                },
+                f,
+                indent=2,
+            )
 
     dummy_x = jnp.zeros((batch_gpu, dataset_obj.num_channels, dataset_obj.resolution, dataset_obj.resolution), dtype=jnp.float32)
     dummy_sigma = jnp.ones((batch_gpu,), dtype=jnp.float32)

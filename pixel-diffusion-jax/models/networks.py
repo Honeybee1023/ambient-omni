@@ -6,7 +6,6 @@ transferred module-by-module during parity testing.
 
 from __future__ import annotations
 
-from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -195,13 +194,13 @@ class GroupNorm(nn.Module):
     eps: float = 1e-5
 
     def setup(self):
-        self.num_groups = min(self.num_groups, self.num_channels // self.min_channels_per_group)
         self.weight = self.param("weight", nn.initializers.ones, (self.num_channels,))
         self.bias = self.param("bias", nn.initializers.zeros, (self.num_channels,))
 
     def __call__(self, x):
         n, c, h, w = x.shape
-        g = self.num_groups
+        g = min(self.num_groups, max(1, c // self.min_channels_per_group))
+        assert c % g == 0, (c, g)
         x = x.reshape(n, g, c // g, h, w)
         mean = jnp.mean(x, axis=(2, 3, 4), keepdims=True)
         var = jnp.mean(jnp.square(x - mean), axis=(2, 3, 4), keepdims=True)
@@ -240,7 +239,8 @@ class UNetBlock(nn.Module):
     init_attn: Optional[dict] = None
 
     def setup(self):
-        self.num_heads = 0 if not self.attention else (self.num_heads if self.num_heads is not None else self.out_channels // self.channels_per_head)
+        num_heads = 0 if not self.attention else (self.num_heads if self.num_heads is not None else self.out_channels // self.channels_per_head)
+        object.__setattr__(self, "num_heads", num_heads)
         init = self.init or {}
         init_zero = self.init_zero or {}
         init_attn = self.init_attn or init
@@ -280,7 +280,7 @@ class UNetBlock(nn.Module):
                 **init,
             )
 
-        if self.num_heads:
+        if num_heads:
             self.norm2 = GroupNorm(num_channels=self.out_channels, eps=self.eps)
             self.qkv = Conv2d(
                 in_channels=self.out_channels,
@@ -310,8 +310,10 @@ class UNetBlock(nn.Module):
         else:
             x = jax.nn.silu(self.norm1(x + params))
 
-        if self.dropout > 0:
-            x = nn.Dropout(rate=self.dropout)(x, deterministic=not train)
+        if self.dropout > 0 and train:
+            keep_prob = 1.0 - self.dropout
+            mask = jax.random.bernoulli(self.make_rng("dropout"), keep_prob, x.shape)
+            x = jnp.where(mask, x / keep_prob, jnp.zeros_like(x))
         x = self.conv1(x)
         x = x + (self.skip(orig) if self.skip is not None else orig)
         x = x * self.skip_scale
@@ -358,10 +360,6 @@ class FourierEmbedding(nn.Module):
         x = jnp.asarray(x).reshape(-1, 1)
         x = x * (2 * np.pi * self.freqs.value.astype(x.dtype))
         return jnp.concatenate([jnp.cos(x), jnp.sin(x)], axis=1)
-
-
-def _collect_skip_channels(modules):
-    return [block.out_channels for _, block in modules.items() if "aux" not in _]
 
 
 class SongUNet(nn.Module):
@@ -413,7 +411,7 @@ class SongUNet(nn.Module):
         self.map_layer0 = Linear(in_features=noise_channels, out_features=emb_channels, **init)
         self.map_layer1 = Linear(in_features=emb_channels, out_features=emb_channels, **init)
 
-        enc = OrderedDict()
+        enc = []
         cout = self.in_channels
         caux = self.in_channels
         for level, mult in enumerate(self.channel_mult):
@@ -421,41 +419,41 @@ class SongUNet(nn.Module):
             if level == 0:
                 cin = cout
                 cout = self.model_channels
-                enc[f"{res}x{res}_conv"] = Conv2d(in_channels=cin, out_channels=cout, kernel=3, **init)
+                enc.append((f"{res}x{res}_conv", Conv2d(in_channels=cin, out_channels=cout, kernel=3, **init)))
             else:
-                enc[f"{res}x{res}_down"] = UNetBlock(in_channels=cout, out_channels=cout, down=True, **block_kwargs)
+                enc.append((f"{res}x{res}_down", UNetBlock(in_channels=cout, out_channels=cout, down=True, **block_kwargs)))
                 if self.encoder_type == "skip":
-                    enc[f"{res}x{res}_aux_down"] = Conv2d(in_channels=caux, out_channels=caux, kernel=0, down=True, resample_filter=self.resample_filter)
-                    enc[f"{res}x{res}_aux_skip"] = Conv2d(in_channels=caux, out_channels=cout, kernel=1, **init)
+                    enc.append((f"{res}x{res}_aux_down", Conv2d(in_channels=caux, out_channels=caux, kernel=0, down=True, resample_filter=self.resample_filter)))
+                    enc.append((f"{res}x{res}_aux_skip", Conv2d(in_channels=caux, out_channels=cout, kernel=1, **init)))
                 if self.encoder_type == "residual":
-                    enc[f"{res}x{res}_aux_residual"] = Conv2d(in_channels=caux, out_channels=cout, kernel=3, down=True, resample_filter=self.resample_filter, fused_resample=True, **init)
+                    enc.append((f"{res}x{res}_aux_residual", Conv2d(in_channels=caux, out_channels=cout, kernel=3, down=True, resample_filter=self.resample_filter, fused_resample=True, **init)))
                     caux = cout
             for idx in range(self.num_blocks):
                 cin = cout
                 cout = self.model_channels * mult
                 attn = res in self.attn_resolutions
-                enc[f"{res}x{res}_block{idx}"] = UNetBlock(in_channels=cin, out_channels=cout, attention=attn, **block_kwargs)
+                enc.append((f"{res}x{res}_block{idx}", UNetBlock(in_channels=cin, out_channels=cout, attention=attn, **block_kwargs)))
         self.enc = enc
-        skips = [block.out_channels for name, block in self.enc.items() if "aux" not in name]
+        skips = [block.out_channels for name, block in self.enc if "aux" not in name]
 
-        dec = OrderedDict()
+        dec = []
         for level, mult in reversed(list(enumerate(self.channel_mult))):
             res = self.img_resolution >> level
             if level == len(self.channel_mult) - 1:
-                dec[f"{res}x{res}_in0"] = UNetBlock(in_channels=cout, out_channels=cout, attention=True, **block_kwargs)
-                dec[f"{res}x{res}_in1"] = UNetBlock(in_channels=cout, out_channels=cout, **block_kwargs)
+                dec.append((f"{res}x{res}_in0", UNetBlock(in_channels=cout, out_channels=cout, attention=True, **block_kwargs)))
+                dec.append((f"{res}x{res}_in1", UNetBlock(in_channels=cout, out_channels=cout, **block_kwargs)))
             else:
-                dec[f"{res}x{res}_up"] = UNetBlock(in_channels=cout, out_channels=cout, up=True, **block_kwargs)
+                dec.append((f"{res}x{res}_up", UNetBlock(in_channels=cout, out_channels=cout, up=True, **block_kwargs)))
             for idx in range(self.num_blocks + 1):
                 cin = cout + skips.pop()
                 cout = self.model_channels * mult
                 attn = idx == self.num_blocks and res in self.attn_resolutions
-                dec[f"{res}x{res}_block{idx}"] = UNetBlock(in_channels=cin, out_channels=cout, attention=attn, **block_kwargs)
+                dec.append((f"{res}x{res}_block{idx}", UNetBlock(in_channels=cin, out_channels=cout, attention=attn, **block_kwargs)))
             if self.decoder_type == "skip" or level == 0:
                 if self.decoder_type == "skip" and level < len(self.channel_mult) - 1:
-                    dec[f"{res}x{res}_aux_up"] = Conv2d(in_channels=self.out_channels, out_channels=self.out_channels, kernel=0, up=True, resample_filter=self.resample_filter)
-                dec[f"{res}x{res}_aux_norm"] = GroupNorm(num_channels=cout, eps=1e-6)
-                dec[f"{res}x{res}_aux_conv"] = Conv2d(in_channels=cout, out_channels=self.out_channels, kernel=3, **init_zero)
+                    dec.append((f"{res}x{res}_aux_up", Conv2d(in_channels=self.out_channels, out_channels=self.out_channels, kernel=0, up=True, resample_filter=self.resample_filter)))
+                dec.append((f"{res}x{res}_aux_norm", GroupNorm(num_channels=cout, eps=1e-6)))
+                dec.append((f"{res}x{res}_aux_conv", Conv2d(in_channels=cout, out_channels=self.out_channels, kernel=3, **init_zero)))
         self.dec = dec
 
     def _map(self, noise_labels, class_labels, augment_labels, train):
@@ -479,7 +477,7 @@ class SongUNet(nn.Module):
 
         skips = []
         aux = x
-        for name, block in self.enc.items():
+        for name, block in self.enc:
             if "aux_down" in name:
                 aux = block(aux)
             elif "aux_skip" in name:
@@ -492,7 +490,7 @@ class SongUNet(nn.Module):
 
         aux = None
         tmp = None
-        for name, block in self.dec.items():
+        for name, block in self.dec:
             if "aux_up" in name:
                 aux = block(aux)
             elif "aux_norm" in name:
@@ -511,7 +509,7 @@ class SongUNet(nn.Module):
 
         skips = []
         aux = x
-        for name, block in self.enc.items():
+        for name, block in self.enc:
             if "aux_down" in name:
                 aux = block(aux)
             elif "aux_skip" in name:
@@ -524,7 +522,7 @@ class SongUNet(nn.Module):
 
         aux = None
         tmp = None
-        for name, block in self.dec.items():
+        for name, block in self.dec:
             if "aux_up" in name:
                 aux = block(aux)
             elif "aux_norm" in name:
@@ -539,8 +537,92 @@ class SongUNet(nn.Module):
         return aux
 
 
-class DhariwalUNet(SongUNet):
-    pass
+class DhariwalUNet(nn.Module):
+    img_resolution: int
+    in_channels: int
+    out_channels: int
+    label_dim: int = 0
+    augment_dim: int = 0
+    model_channels: int = 192
+    channel_mult: tuple = (1, 2, 3, 4)
+    channel_mult_emb: int = 4
+    num_blocks: int = 3
+    attn_resolutions: tuple = (32, 16, 8)
+    dropout: float = 0.10
+    label_dropout: float = 0.0
+
+    def setup(self):
+        emb_channels = self.model_channels * self.channel_mult_emb
+        init = dict(init_mode="kaiming_uniform", init_weight=np.sqrt(1 / 3), init_bias=np.sqrt(1 / 3))
+        init_zero = dict(init_mode="kaiming_uniform", init_weight=0, init_bias=0)
+        block_kwargs = dict(emb_channels=emb_channels, channels_per_head=64, dropout=self.dropout, init=init, init_zero=init_zero)
+
+        self.map_noise = PositionalEmbedding(num_channels=self.model_channels)
+        self.map_augment = Linear(in_features=self.augment_dim, out_features=self.model_channels, bias=False, **init_zero) if self.augment_dim else None
+        self.map_layer0 = Linear(in_features=self.model_channels, out_features=emb_channels, **init)
+        self.map_layer1 = Linear(in_features=emb_channels, out_features=emb_channels, **init)
+        self.map_label = Linear(in_features=self.label_dim, out_features=emb_channels, bias=False, init_mode="kaiming_normal", init_weight=np.sqrt(self.label_dim)) if self.label_dim else None
+
+        enc = []
+        cout = self.in_channels
+        for level, mult in enumerate(self.channel_mult):
+            res = self.img_resolution >> level
+            if level == 0:
+                cin = cout
+                cout = self.model_channels * mult
+                enc.append((f"{res}x{res}_conv", Conv2d(in_channels=cin, out_channels=cout, kernel=3, **init)))
+            else:
+                enc.append((f"{res}x{res}_down", UNetBlock(in_channels=cout, out_channels=cout, down=True, **block_kwargs)))
+            for idx in range(self.num_blocks):
+                cin = cout
+                cout = self.model_channels * mult
+                enc.append((f"{res}x{res}_block{idx}", UNetBlock(in_channels=cin, out_channels=cout, attention=(res in self.attn_resolutions), **block_kwargs)))
+        self.enc = enc
+        skips = [block.out_channels for _, block in self.enc]
+
+        dec = []
+        for level, mult in reversed(list(enumerate(self.channel_mult))):
+            res = self.img_resolution >> level
+            if level == len(self.channel_mult) - 1:
+                dec.append((f"{res}x{res}_in0", UNetBlock(in_channels=cout, out_channels=cout, attention=True, **block_kwargs)))
+                dec.append((f"{res}x{res}_in1", UNetBlock(in_channels=cout, out_channels=cout, **block_kwargs)))
+            else:
+                dec.append((f"{res}x{res}_up", UNetBlock(in_channels=cout, out_channels=cout, up=True, **block_kwargs)))
+            for idx in range(self.num_blocks + 1):
+                cin = cout + skips.pop()
+                cout = self.model_channels * mult
+                dec.append((f"{res}x{res}_block{idx}", UNetBlock(in_channels=cin, out_channels=cout, attention=(res in self.attn_resolutions), **block_kwargs)))
+        self.dec = dec
+        self.out_norm = GroupNorm(num_channels=cout)
+        self.out_conv = Conv2d(in_channels=cout, out_channels=self.out_channels, kernel=3, **init_zero)
+
+    def _map(self, noise_labels, class_labels, augment_labels, train):
+        emb = self.map_noise(noise_labels)
+        if self.map_augment is not None and augment_labels is not None:
+            emb = emb + self.map_augment(augment_labels)
+        emb = jax.nn.silu(self.map_layer0(emb))
+        emb = self.map_layer1(emb)
+        if self.map_label is not None:
+            tmp = class_labels
+            if train and self.label_dropout:
+                rng = self.make_rng("dropout")
+                keep = jax.random.uniform(rng, (noise_labels.shape[0], 1)) >= self.label_dropout
+                tmp = tmp * keep.astype(tmp.dtype)
+            emb = emb + self.map_label(tmp)
+        return jax.nn.silu(emb)
+
+    def __call__(self, x, noise_labels, class_labels, augment_labels=None, train: bool = False):
+        emb = self._map(noise_labels, class_labels, augment_labels, train=train)
+        skips = []
+        for _, block in self.enc:
+            x = block(x, emb, train=train) if isinstance(block, UNetBlock) else block(x)
+            skips.append(x)
+        for _, block in self.dec:
+            if x.shape[1] != block.in_channels:
+                x = jnp.concatenate([x, skips.pop()], axis=1)
+            x = block(x, emb, train=train)
+        x = self.out_conv(jax.nn.silu(self.out_norm(x)))
+        return x
 
 
 class VPPrecond(nn.Module):

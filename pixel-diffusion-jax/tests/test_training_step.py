@@ -20,15 +20,17 @@ def test_single_jax_training_step_updates_params():
         sigma_max=float("inf"),
         sigma_data=0.5,
         model_type="SongUNet",
-        model_channels=128,
-        channel_mult=[2, 2, 2],
-        channel_mult_noise=1,
-        resample_filter=[1, 1],
-        dropout=0.13,
-        augment_dim=9,
-        embedding_type="positional",
-        encoder_type="standard",
-        decoder_type="standard",
+        model_kwargs=dict(
+            model_channels=128,
+            channel_mult=[2, 2, 2],
+            channel_mult_noise=1,
+            resample_filter=[1, 1],
+            dropout=0.13,
+            augment_dim=9,
+            embedding_type="positional",
+            encoder_type="standard",
+            decoder_type="standard",
+        ),
     )
     model = EDMPrecond(**cfg)
     x = jnp.asarray(np.random.randn(2, 3, 64, 64).astype(np.float32))

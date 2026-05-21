@@ -45,7 +45,7 @@ class PTStackedRandomGenerator:
 
 def test_edm_sampler_matches_pytorch():
     pt_networks = load_pt_networks()
-    cfg = dict(
+    pt_cfg = dict(
         img_resolution=64,
         img_channels=3,
         label_dim=0,
@@ -65,8 +65,30 @@ def test_edm_sampler_matches_pytorch():
         decoder_type="standard",
     )
 
-    pt_model = pt_networks.EDMPrecond(**cfg).eval()
-    jax_model = EDMPrecond(**cfg)
+    jax_cfg = dict(
+        img_resolution=64,
+        img_channels=3,
+        label_dim=0,
+        use_fp16=False,
+        sigma_min=0.0,
+        sigma_max=float("inf"),
+        sigma_data=0.5,
+        model_type="SongUNet",
+        model_kwargs=dict(
+            model_channels=128,
+            channel_mult=[2, 2, 2],
+            channel_mult_noise=1,
+            resample_filter=[1, 1],
+            dropout=0.13,
+            augment_dim=9,
+            embedding_type="positional",
+            encoder_type="standard",
+            decoder_type="standard",
+        ),
+    )
+
+    pt_model = pt_networks.EDMPrecond(**pt_cfg).eval()
+    jax_model = EDMPrecond(**jax_cfg)
     x = np.random.randn(2, 3, 64, 64).astype(np.float32)
     latents = np.random.randn(2, 3, 64, 64).astype(np.float64)
     augment = np.zeros((2, 9), dtype=np.float32)

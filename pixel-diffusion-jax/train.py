@@ -104,8 +104,7 @@ def main(**kwargs):
         raise click.ClickException(f"--data: {err}")
 
     if opts["arch"] == "ddpmpp":
-        network_kwargs = dict(
-            class_name="models.networks.EDMPrecond",
+        model_kwargs = dict(
             model_type="SongUNet",
             embedding_type="positional",
             encoder_type="standard",
@@ -116,8 +115,7 @@ def main(**kwargs):
             channel_mult=[2, 2, 2],
         )
     elif opts["arch"] == "ncsnpp":
-        network_kwargs = dict(
-            class_name="models.networks.EDMPrecond",
+        model_kwargs = dict(
             model_type="SongUNet",
             embedding_type="fourier",
             encoder_type="residual",
@@ -128,19 +126,23 @@ def main(**kwargs):
             channel_mult=[2, 2, 2],
         )
     else:
-        network_kwargs = dict(
-            class_name="models.networks.EDMPrecond",
+        model_kwargs = dict(
             model_type="DhariwalUNet",
             model_channels=192,
             channel_mult=[1, 2, 3, 4],
         )
 
     if opts["cbase"] is not None:
-        network_kwargs["model_channels"] = opts["cbase"]
+        model_kwargs["model_channels"] = opts["cbase"]
     if opts["cres"] is not None:
-        network_kwargs["channel_mult"] = opts["cres"]
+        model_kwargs["channel_mult"] = opts["cres"]
 
-    network_kwargs.update(dropout=opts["dropout"], use_fp16=opts["fp16"], augment_dim=9 if opts["augment"] else 0)
+    model_kwargs.update(dropout=opts["dropout"], use_fp16=opts["fp16"], augment_dim=9 if opts["augment"] else 0)
+
+    network_kwargs = dict(
+        class_name="models.networks.EDMPrecond",
+        model_kwargs=model_kwargs,
+    )
 
     loss_kwargs = dict(class_name="training.loss.AmbientEDMLoss")
     optimizer_kwargs = dict(lr=opts["lr"], betas=(0.9, 0.999), weight_decay=opts["weight_decay"])
