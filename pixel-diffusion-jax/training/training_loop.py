@@ -282,7 +282,7 @@ def training_loop(
     dummy_sigma = jnp.ones((batch_gpu,), dtype=jnp.float32)
     dummy_labels = jnp.zeros((batch_gpu, dataset_obj.label_dim), dtype=jnp.float32)
     init_key, jax_key = jax.random.split(jax_key)
-    variables = model.init(init_key, dummy_x, dummy_sigma, dummy_labels, train=True)
+    variables = model.init({"params": init_key, "dropout": init_key}, dummy_x, dummy_sigma, dummy_labels, train=True)
     state = create_train_state(model.apply, variables, tx)
 
     if resume_state_dump is not None:

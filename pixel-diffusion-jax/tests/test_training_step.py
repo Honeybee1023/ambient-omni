@@ -35,7 +35,7 @@ def test_single_jax_training_step_updates_params():
     sigma = jnp.asarray(np.exp(np.random.randn(2).astype(np.float32)))
     labels = jnp.zeros((2, 0), dtype=jnp.float32)
     augment = jnp.zeros((2, 9), dtype=jnp.float32)
-    variables = model.init(jax.random.PRNGKey(0), x, sigma, labels, augment_labels=augment, train=True)
+    variables = model.init({"params": jax.random.PRNGKey(0), "dropout": jax.random.PRNGKey(1)}, x, sigma, labels, augment_labels=augment, train=True)
     tx = optax.adam(1e-4)
     state = create_train_state(model.apply, variables, tx)
     loss_obj = AmbientEDMLoss()
@@ -50,4 +50,3 @@ def test_single_jax_training_step_updates_params():
     updates, opt_state = state.tx.update(grads, state.opt_state, state.params)
     new_params = optax.apply_updates(state.params, updates)
     assert jax.tree_util.tree_all(jax.tree_util.tree_map(lambda a, b: a.shape == b.shape, state.params, new_params))
-
