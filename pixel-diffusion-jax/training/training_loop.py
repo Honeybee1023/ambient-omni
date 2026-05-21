@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import importlib
 import json
 import os
@@ -20,7 +19,7 @@ import ambient_utils
 import wandb
 
 from training.loss import AmbientEDMLoss
-from training.training_state import TrainState, create_train_state, pack_variables, restore_checkpoint, save_checkpoint
+from training.training_state import TrainState, create_train_state, load_torch_snapshot_into_variables, pack_variables, restore_checkpoint, save_checkpoint
 from utils.distributed import get_rank, get_world_size, print0, should_stop, update_progress
 from utils.misc import InfiniteSampler
 
@@ -328,6 +327,15 @@ def training_loop(
     variables = model.init({"params": init_key, "dropout": init_key}, dummy_x, dummy_sigma, dummy_labels, train=True)
     state = create_train_state(model.apply, variables, tx)
 
+    if resume_pkl is not None:
+        print0(f'Loading network weights from "{resume_pkl}"...')
+        variables = load_torch_snapshot_into_variables(variables, resume_pkl)
+        state = state.replace(
+            params=variables["params"],
+            ema_params=variables["params"],
+            model_variables={k: v for k, v in variables.items() if k != "params"},
+        )
+
     if resume_state_dump is not None:
         restored = restore_checkpoint(os.path.dirname(resume_state_dump), step=int(resume_kimg))
         state = state.replace(
@@ -336,9 +344,6 @@ def training_loop(
             ema_params=restored["ema_params"],
             model_variables=restored["model_variables"],
         )
-
-    if resume_pkl is not None:
-        raise NotImplementedError("Restoring PyTorch snapshots into the JAX port is not yet supported.")
 
     print0(f"Training for {total_kimg} kimg...")
     cur_nimg = resume_kimg * 1000
