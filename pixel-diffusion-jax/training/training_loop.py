@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import contextlib
 import copy
 import importlib
-import importlib.util
 import json
-import math
 import os
 from collections import defaultdict
 from pathlib import Path
@@ -37,13 +34,8 @@ def _resolve_class(class_name):
 
 
 def _load_original_augment_pipe():
-    repo_root = Path(__file__).resolve().parents[2]
-    augment_path = repo_root / "pixel-diffusion" / "training" / "augment.py"
-    spec = importlib.util.spec_from_file_location("pixel_diffusion_pt_augment", augment_path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec is not None and spec.loader is not None
-    spec.loader.exec_module(module)
-    return module.AugmentPipe
+    augment_mod = importlib.import_module("training.augment")
+    return augment_mod.AugmentPipe
 
 
 def sample_t(current_sigma, loc, scale):

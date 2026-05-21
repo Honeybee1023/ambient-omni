@@ -36,7 +36,8 @@ def load_pt_generate():
 
 def flatten_pt_state_dict(state_dict):
     items = []
-    for key, value in state_dict.items():
+    for key in sorted(state_dict.keys()):
+        value = state_dict[key]
         if key.endswith("resample_filter") or key.endswith("freqs"):
             continue
         if isinstance(value, torch.Tensor):
@@ -64,4 +65,3 @@ def make_jax_input(batch=2, channels=3, resolution=64, augment_dim=9):
     labels = np.zeros((batch, 0), dtype=np.float32)
     augment = np.zeros((batch, augment_dim), dtype=np.float32)
     return x, sigma, labels, augment
-
