@@ -348,15 +348,15 @@ class FourierEmbedding(nn.Module):
     scale: float = 16.0
 
     def setup(self):
-        self.freqs = self.param(
+        self.freqs = self.variable(
+            "constants",
             "freqs",
-            lambda key, shape: jax.random.normal(key, shape) * self.scale,
-            (self.num_channels // 2,),
+            lambda: jax.random.normal(jax.random.PRNGKey(0), (self.num_channels // 2,)) * self.scale,
         )
 
     def __call__(self, x):
         x = jnp.asarray(x).reshape(-1, 1)
-        x = x * (2 * np.pi * self.freqs.astype(x.dtype))
+        x = x * (2 * np.pi * self.freqs.value.astype(x.dtype))
         return jnp.concatenate([jnp.cos(x), jnp.sin(x)], axis=1)
 
 

@@ -17,7 +17,7 @@ class AmbientEDMLoss:
     def __call__(
         self,
         apply_fn,
-        params,
+        variables,
         rng,
         x_tn,
         sigma_tn,
@@ -34,7 +34,7 @@ class AmbientEDMLoss:
         x_t = x_tn + noise_tn_to_t
 
         x0_pred = apply_fn(
-            {"params": params},
+            variables,
             x_t,
             sigma_t.squeeze(),
             labels,
@@ -61,7 +61,7 @@ class AmbientEDMCLSLoss:
     def __call__(
         self,
         apply_fn,
-        params,
+        variables,
         rng,
         x0,
         sigma_t,
@@ -74,7 +74,7 @@ class AmbientEDMCLSLoss:
         sigma_t = jnp.asarray(sigma_t, dtype=jnp.float32).reshape(-1, 1, 1, 1)
         x_t = x0 + jax.random.normal(rng, x0.shape, dtype=x0.dtype) * sigma_t
         output = apply_fn(
-            {"params": params},
+            variables,
             x_t,
             sigma_t.squeeze(),
             labels,
