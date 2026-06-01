@@ -1,11 +1,11 @@
 """
 Bayesian Optimization for 7D T-space exploration.
-Reads all 2k kimg metrics, fits additive+interaction GP, suggests batch of points.
-Creates annotated datasets for each suggested point.
+Reads all 2k kimg metrics, fits additive+interaction GP in log(FID) space,
+suggests batch of points via UCB.
 
 Usage:
   python bo_suggest.py --round 1 --batch-size 15 --beta 1.0
-  python bo_suggest.py --round 1 --dry-run   # just print data, don't fit GP
+  python bo_suggest.py --round 1 --dry-run
 """
 import os, sys, json, glob, re, argparse, shutil
 import numpy as np
@@ -20,6 +20,10 @@ ANNOTATED_DIR = "/data/scratch/honjar/annotated_datasets"
 METRICS_DIR = "/data/scratch/honjar/generated"
 BUCKETS = [1, 2, 3, 4, 5, 6, 7]
 BLUR_SIGMAS = {1: 0.5, 2: 1.0, 3: 2.0, 4: 3.0, 5: 4.0, 6: 5.0, 7: 8.0}
+
+# Per-bucket minimum T for candidate generation (post-transition from 2k sigmoid fits).
+# Keeps candidates in the region where data could plausibly help, not the plateau.
+T_FLOOR = np.array([0.00, 0.70, 0.84, 0.90, 0.93, 0.95, 0.96])
 
 
 # === T <-> sigma_min (VERIFIED EXACT) ===
@@ -65,9 +69,8 @@ def collect_2domain_data():
             metrics = json.load(f)
         fid = metrics['fid_score']
 
-        # 7D T-vector: all T=1 except this bucket
         t_vec = [1.0] * 7
-        t_vec[bucket - 1] = t_value  # bucket 1 -> index 0
+        t_vec[bucket - 1] = t_value
 
         data_points.append({
             'source': f'2d_b{bucket}_T{t_suffix}',
@@ -79,12 +82,10 @@ def collect_2domain_data():
 
 def collect_independence_data():
     """Read independence test metrics with known T-vectors."""
-    # Hardcoded T-vectors for 2k kimg independence tests
     indep_configs = {
         'celeba_indep2k_all_argmin':  [0.95, 0.95, 1.0, 0.97, 0.99, 0.99, 1.0],
         'celeba_indep2k_argmin_low':  [0.95, 0.95, 1.0, 1.0,  1.0,  1.0,  1.0],
         'celeba_indep2k_argmin_high': [1.0,  1.0,  1.0, 0.97, 0.99, 0.99, 1.0],
-        # 1k kimg tests (different training runs, include for more data)
         'celeba_indep_all_argmin':    [0.90, 0.99, 0.95, 0.97, 0.97, 0.97, 0.99],
         'celeba_indep_argmin_low':    [0.90, 0.99, 0.95, 1.0,  1.0,  1.0,  1.0],
         'celeba_indep_argmin_high':   [1.0,  1.0,  1.0,  0.97, 0.97, 0.97, 0.99],
@@ -93,7 +94,6 @@ def collect_independence_data():
 
     data_points = []
     for name, t_vec in indep_configs.items():
-        # Check for 2k kimg version first, then 1k
         for suffix in ['2000kimg', '1000kimg']:
             fpath = os.path.join(METRICS_DIR, f"metrics_{name}_{suffix}.json")
             if os.path.exists(fpath):
@@ -104,16 +104,15 @@ def collect_independence_data():
                     't_vec': t_vec,
                     'fid': metrics['fid_score']
                 })
-                break  # only use the best available kimg
+                break
     return data_points
 
 
 def collect_bo_data():
-    """Read any previous BO round metrics (identified by tvec sidecar files)."""
+    """Read any previous BO round metrics."""
     data_points = []
     pattern = os.path.join(METRICS_DIR, "tvec_celeba_bo_*.json")
     for tvec_path in sorted(glob.glob(pattern)):
-        # tvec_celeba_bo_r1_p00.json -> metrics_celeba_bo_r1_p00_2000kimg.json
         base = os.path.basename(tvec_path).replace('tvec_', '').replace('.json', '')
         metrics_path = os.path.join(METRICS_DIR, f"metrics_{base}_2000kimg.json")
         if os.path.exists(metrics_path):
@@ -130,8 +129,8 @@ def collect_bo_data():
 
 
 # === GP Model ===
-def build_and_fit_gp(X, Y, n_iter=200):
-    """Fit additive + interaction GP."""
+def build_and_fit_gp(X, Y_log, n_iter=200):
+    """Fit additive + interaction GP on log(FID)."""
     import torch
     import gpytorch
 
@@ -140,7 +139,6 @@ def build_and_fit_gp(X, Y, n_iter=200):
             super().__init__(train_x, train_y, likelihood)
             self.mean_module = gpytorch.means.ConstantMean()
 
-            # Additive: sum of 7 independent 1D RBF kernels
             self.additive_kernel = gpytorch.kernels.ScaleKernel(
                 gpytorch.kernels.AdditiveStructureKernel(
                     gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel()),
@@ -148,7 +146,6 @@ def build_and_fit_gp(X, Y, n_iter=200):
                 )
             )
 
-            # Interaction: full 7D RBF with per-dimension lengthscales (ARD)
             self.interaction_kernel = gpytorch.kernels.ScaleKernel(
                 gpytorch.kernels.RBFKernel(ard_num_dims=7)
             )
@@ -161,12 +158,10 @@ def build_and_fit_gp(X, Y, n_iter=200):
             return gpytorch.distributions.MultivariateNormal(mean, covar)
 
     train_x = torch.tensor(X, dtype=torch.float64)
-    train_y = torch.tensor(Y, dtype=torch.float64)
+    train_y = torch.tensor(Y_log, dtype=torch.float64)
 
     likelihood = gpytorch.likelihoods.GaussianLikelihood()
     model = AdditiveInteractionGP(train_x, train_y, likelihood)
-
-    # Use double precision for stability
     model = model.double()
     likelihood = likelihood.double()
 
@@ -188,23 +183,22 @@ def build_and_fit_gp(X, Y, n_iter=200):
         if (i + 1) % 50 == 0:
             print(f"  GP iter {i+1}/{n_iter}, loss={loss.item():.3f} (best={best_loss:.3f})")
 
-    # Diagnostics
     model.eval()
     likelihood.eval()
     add_scale = model.additive_kernel.outputscale.item()
     int_scale = model.interaction_kernel.outputscale.item()
     total = add_scale + int_scale
     noise = likelihood.noise.item()
-    print(f"\n  Kernel weights: additive={add_scale:.2f} ({100*add_scale/total:.0f}%), "
-          f"interaction={int_scale:.2f} ({100*int_scale/total:.0f}%)")
-    print(f"  Observation noise: {noise:.3f} (sqrt={noise**0.5:.2f} FID)")
+    print(f"\n  Kernel weights: additive={add_scale:.3f} ({100*add_scale/total:.0f}%), "
+          f"interaction={int_scale:.3f} ({100*int_scale/total:.0f}%)")
+    print(f"  Observation noise (log space): {noise:.4f} (sqrt={noise**0.5:.3f})")
 
     return model, likelihood, train_x
 
 
 def suggest_batch(model, likelihood, train_x, batch_size=15, beta=1.0,
                   n_candidates=50000, seed=42):
-    """UCB batch selection with diversity enforcement."""
+    """UCB batch selection in log(FID) space with per-bucket T constraints."""
     import torch
     import gpytorch
 
@@ -212,63 +206,68 @@ def suggest_batch(model, likelihood, train_x, batch_size=15, beta=1.0,
     model.eval()
     likelihood.eval()
 
-    # --- Generate candidates focused near the optimum region ---
+    # --- Generate candidates with per-bucket T floors ---
+    # T_FLOOR prevents exploring the plateau region where data clearly hurts
+    t_lo = T_FLOOR.copy()
+    t_hi = np.ones(7)
+
     parts = []
 
-    # 60% in [0.88, 1.0]^7 — tight around known argmins
+    # 60% near argmin: [max(floor, 0.92), 1.0] per bucket
     n1 = int(n_candidates * 0.6)
-    parts.append(rng.uniform(0.88, 1.0, size=(n1, 7)))
+    lo_near = np.maximum(t_lo, 0.92)
+    parts.append(rng.uniform(lo_near, t_hi, size=(n1, 7)))
 
-    # 25% in [0.75, 1.0]^7 — moderate exploration
-    n2 = int(n_candidates * 0.25)
-    parts.append(rng.uniform(0.75, 1.0, size=(n2, 7)))
+    # 30% moderate: [max(floor, 0.85), 1.0] per bucket
+    n2 = int(n_candidates * 0.3)
+    lo_mod = np.maximum(t_lo, 0.85)
+    parts.append(rng.uniform(lo_mod, t_hi, size=(n2, 7)))
 
-    # 15% in [0.50, 1.0]^7 — broad exploration
+    # 10% broader: [floor, 1.0] per bucket
     n3 = n_candidates - n1 - n2
-    parts.append(rng.uniform(0.50, 1.0, size=(n3, 7)))
+    parts.append(rng.uniform(t_lo, t_hi, size=(n3, 7)))
 
     candidates = np.concatenate(parts, axis=0)
     cand_t = torch.tensor(candidates, dtype=torch.float64)
 
-    # --- Evaluate LCB (lower is better for minimization) ---
+    # --- Evaluate LCB in log(FID) space ---
     with torch.no_grad(), gpytorch.settings.fast_pred_var():
-        # Process in chunks to avoid memory issues
         chunk_size = 5000
-        mus, sigmas = [], []
+        mus_log, sigmas_log = [], []
         for start in range(0, len(cand_t), chunk_size):
             chunk = cand_t[start:start + chunk_size]
             pred = likelihood(model(chunk))
-            mus.append(pred.mean.numpy())
-            sigmas.append(pred.variance.sqrt().numpy())
-        mu_all = np.concatenate(mus)
-        sigma_all = np.concatenate(sigmas)
+            mus_log.append(pred.mean.numpy())
+            sigmas_log.append(pred.variance.sqrt().numpy())
+        mu_log = np.concatenate(mus_log)
+        sigma_log = np.concatenate(sigmas_log)
 
-    lcb = mu_all - beta * sigma_all  # lower = more promising
+    # LCB in log space (lower log(FID) = lower FID = better)
+    lcb_log = mu_log - beta * sigma_log
 
-    # --- Greedy batch selection with minimum distance ---
+    # --- Greedy batch selection with diversity ---
     selected = []
     selected_info = []
     remaining_mask = np.ones(len(candidates), dtype=bool)
 
     for _ in range(batch_size):
-        lcb_remaining = lcb[remaining_mask]
-        cand_remaining = candidates[remaining_mask]
-        mu_remaining = mu_all[remaining_mask]
-        sigma_remaining = sigma_all[remaining_mask]
+        lcb_rem = lcb_log[remaining_mask]
+        cand_rem = candidates[remaining_mask]
+        mu_rem = mu_log[remaining_mask]
+        sigma_rem = sigma_log[remaining_mask]
 
-        if len(lcb_remaining) == 0:
+        if len(lcb_rem) == 0:
             break
 
-        best_local = np.argmin(lcb_remaining)
-        point = cand_remaining[best_local].copy()
+        best_local = np.argmin(lcb_rem)
+        point = cand_rem[best_local].copy()
         selected.append(point.tolist())
         selected_info.append({
-            'mu': float(mu_remaining[best_local]),
-            'sigma': float(sigma_remaining[best_local]),
-            'lcb': float(lcb_remaining[best_local]),
+            'predicted_fid': float(np.exp(mu_rem[best_local])),
+            'fid_lcb': float(np.exp(lcb_rem[best_local])),
+            'sigma_log': float(sigma_rem[best_local]),
         })
 
-        # Exclude nearby candidates (L2 distance < 0.03 in [0,1]^7 space)
         dist = np.linalg.norm(candidates - point, axis=1)
         remaining_mask &= (dist > 0.03)
 
@@ -298,13 +297,11 @@ def create_bo_dataset(name, t_vec, target_files, all_bucket_files):
 
     annotations = []
 
-    # Bucket 0 (clean target): always sigma_min=0
     for fname in target_files:
         src = os.path.join(SHARED_DIR, fname)
         os.symlink(src, os.path.join(dataset_dir, fname))
         annotations.append({"filename": fname, "sigma_min": 0.0, "sigma_max": 0.0})
 
-    # Buckets 1-7: sigma_min from T-vector
     for i, b in enumerate(BUCKETS):
         t_val = t_vec[i]
         sigma_min = t_to_sigma_min(t_val)
@@ -317,7 +314,6 @@ def create_bo_dataset(name, t_vec, target_files, all_bucket_files):
         for ann in annotations:
             f.write(json.dumps(ann) + "\n")
 
-    # Save T-vector sidecar for future rounds to read back
     t_vec_path = os.path.join(METRICS_DIR, f"tvec_{name}.json")
     with open(t_vec_path, "w") as f:
         json.dump(t_vec, f)
@@ -334,13 +330,12 @@ def create_bo_dataset(name, t_vec, target_files, all_bucket_files):
 # === Main ===
 def main():
     parser = argparse.ArgumentParser(description="BO for 7D T-space")
-    parser.add_argument('--round', type=int, required=True, help='BO round number')
+    parser.add_argument('--round', type=int, required=True)
     parser.add_argument('--batch-size', type=int, default=15)
     parser.add_argument('--beta', type=float, default=1.0,
                         help='UCB exploration weight (lower=more exploitative)')
     parser.add_argument('--gp-iters', type=int, default=300)
-    parser.add_argument('--dry-run', action='store_true',
-                        help='Only print collected data, do not fit GP or create datasets')
+    parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
 
     print("=" * 60)
@@ -348,7 +343,7 @@ def main():
     print(f"Batch size: {args.batch_size}, Beta: {args.beta}")
     print("=" * 60)
 
-    # --- 1. Collect all existing data ---
+    # --- 1. Collect data ---
     print("\n--- Collecting data ---")
     data_2d = collect_2domain_data()
     print(f"  2-domain points: {len(data_2d)}")
@@ -361,35 +356,40 @@ def main():
     print(f"  TOTAL: {len(all_data)} observations")
 
     X = np.array([d['t_vec'] for d in all_data])
-    Y = np.array([d['fid'] for d in all_data])
+    Y_raw = np.array([d['fid'] for d in all_data])
 
-    print(f"  FID range: {Y.min():.2f} – {Y.max():.2f}")
-    print(f"  FID at [1,1,1,1,1,1,1] (T=1 points): "
-          f"{Y[np.all(X == 1.0, axis=1)].mean():.2f} "
-          f"± {Y[np.all(X == 1.0, axis=1)].std():.2f} "
-          f"(n={np.sum(np.all(X == 1.0, axis=1))})")
+    # LOG TRANSFORM: GP works in log(FID) space to prevent negative predictions
+    Y_log = np.log(Y_raw)
+
+    print(f"  FID range: {Y_raw.min():.2f} – {Y_raw.max():.2f}")
+    print(f"  log(FID) range: {Y_log.min():.3f} – {Y_log.max():.3f}")
+
+    t1_mask = np.all(X == 1.0, axis=1)
+    if t1_mask.sum() > 0:
+        print(f"  FID at [1,...,1]: {Y_raw[t1_mask].mean():.2f} "
+              f"± {Y_raw[t1_mask].std():.2f} (n={t1_mask.sum()})")
 
     if args.dry_run:
-        print("\n--- Dry run: printing all data points ---")
+        print("\n--- Dry run: all data points ---")
         for d in sorted(all_data, key=lambda x: x['fid']):
             t_str = "[" + ", ".join(f"{t:.3f}" for t in d['t_vec']) + "]"
             print(f"  FID={d['fid']:6.2f}  {t_str}  {d['source']}")
         print("\n=== Dry run complete. ===")
         return
 
-    # --- 2. Fit GP ---
-    print("\n--- Fitting GP (additive + interaction kernel) ---")
-    model, likelihood, train_x = build_and_fit_gp(X, Y, n_iter=args.gp_iters)
+    # --- 2. Fit GP in log space ---
+    print("\n--- Fitting GP (additive + interaction) in log(FID) space ---")
+    model, likelihood, train_x = build_and_fit_gp(X, Y_log, n_iter=args.gp_iters)
 
     # --- 3. Suggest batch ---
     print(f"\n--- Suggesting {args.batch_size} points (beta={args.beta}) ---")
     suggested, info = suggest_batch(
         model, likelihood, train_x,
         batch_size=args.batch_size, beta=args.beta,
-        seed=args.round * 1000  # different seed per round
+        seed=args.round * 1000
     )
 
-    # --- 4. Print suggestions and create datasets ---
+    # --- 4. Print and create datasets ---
     print(f"\n{'='*60}")
     print(f"SUGGESTED POINTS (Round {args.round})")
     print(f"{'='*60}")
@@ -406,13 +406,13 @@ def main():
         print(f"\n  Point {i:2d}: {name}")
         t_parts = []
         for j, t in enumerate(t_vec_rounded):
-            label = f"B{j+1}={t:.4f}"
+            label = f"B{j+1}={t:.3f}"
             if t >= 0.999:
                 label += "(off)"
             t_parts.append(label)
         print(f"    T = {', '.join(t_parts)}")
-        print(f"    Predicted FID: {si['mu']:.2f} ± {si['sigma']:.2f}  "
-              f"(LCB={si['lcb']:.2f})")
+        print(f"    Predicted FID: {si['predicted_fid']:.2f}  "
+              f"(LCB={si['fid_lcb']:.2f}, σ_log={si['sigma_log']:.3f})")
 
         create_bo_dataset(name, t_vec_rounded, target_files, all_bucket_files)
 
@@ -424,7 +424,8 @@ def main():
         'datasets': dataset_names,
         'suggestions': [
             {'name': name, 't_vec': [round(t, 4) for t in tvec],
-             'predicted_fid': si['mu'], 'predicted_std': si['sigma']}
+             'predicted_fid': si['predicted_fid'],
+             'fid_lcb': si['fid_lcb']}
             for name, tvec, si in zip(dataset_names, suggested, info)
         ]
     }
