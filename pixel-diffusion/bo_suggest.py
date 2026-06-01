@@ -86,9 +86,6 @@ def collect_independence_data():
         'celeba_indep2k_all_argmin':  [0.95, 0.95, 1.0, 0.97, 0.99, 0.99, 1.0],
         'celeba_indep2k_argmin_low':  [0.95, 0.95, 1.0, 1.0,  1.0,  1.0,  1.0],
         'celeba_indep2k_argmin_high': [1.0,  1.0,  1.0, 0.97, 0.99, 0.99, 1.0],
-        'celeba_indep_all_argmin':    [0.90, 0.99, 0.95, 0.97, 0.97, 0.97, 0.99],
-        'celeba_indep_argmin_low':    [0.90, 0.99, 0.95, 1.0,  1.0,  1.0,  1.0],
-        'celeba_indep_argmin_high':   [1.0,  1.0,  1.0,  0.97, 0.97, 0.97, 0.99],
         'celeba_indep_baseline':      [1.0,  1.0,  1.0,  1.0,  1.0,  1.0,  1.0],
     }
 
