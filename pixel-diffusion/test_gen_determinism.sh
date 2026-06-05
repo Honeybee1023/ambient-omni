@@ -8,6 +8,7 @@
 #SBATCH --mem=64G
 #SBATCH --job-name=det_test
 #SBATCH --output=/data/scratch/honjar/train_logs/%j_det_test.out
+#SBATCH --requeue
 
 export PATH=/data/scratch/honjar/miniconda3/envs/ambient/bin:$PATH
 export PYTHONPATH=/data/scratch/honjar/ambient-omni/pixel-diffusion

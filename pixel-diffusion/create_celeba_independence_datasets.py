@@ -120,3 +120,27 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# --- Additional configs (appended) ---
+ARGMIN = {1: 0.90, 2: 0.99, 3: 0.95, 4: 0.97, 5: 0.97, 6: 0.97, 7: 0.99}
+
+EXTRA_CONFIGS = {
+    "celeba_indep_baseline": {
+        1: 1.0, 2: 1.0, 3: 1.0, 4: 1.0, 5: 1.0, 6: 1.0, 7: 1.0,
+    },
+    "celeba_indep_all_argmin": {
+        1: ARGMIN[1], 2: ARGMIN[2], 3: ARGMIN[3],
+        4: ARGMIN[4], 5: ARGMIN[5], 6: ARGMIN[6], 7: ARGMIN[7],
+    },
+}
+
+if __name__ == "__main__":
+    import sys
+    if "--extra" in sys.argv:
+        target_files = get_bucket_files(0)
+        all_bucket_files = {}
+        for b in sorted(BLUR_SIGMAS.keys()):
+            all_bucket_files[b] = get_bucket_files(b)
+        print("\n--- Creating extra independence datasets ---")
+        for name, config in EXTRA_CONFIGS.items():
+            create_dataset(name, config, target_files, all_bucket_files)
