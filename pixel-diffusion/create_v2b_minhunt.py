@@ -1,17 +1,4 @@
-"""
-Fine-grained minimum hunt for all buckets.
-Fills gaps around the current empirical minimums.
-
-B1: {0.475}                                    (1)
-B2: {0.425, 0.475, 0.525}                      (3)
-B3: {0.475, 0.525}                              (2)
-B4: {0.35, 0.45, 0.475}                         (3)
-B5: {0.3, 0.35, 0.375, 0.425, 0.45, 0.475}     (6)
-B6: {0.3, 0.35, 0.45, 0.5, 0.55, 0.65, 0.7}    (7)
-B7: {0.3, 0.35, 0.45, 0.5, 0.55, 0.65, 0.7}    (7)
-Total: 29 new datasets
-"""
-import os, json, shutil, sys
+import os, json, shutil
 import numpy as np
 from scipy.stats import norm
 
@@ -39,22 +26,21 @@ for b in range(N_BUCKETS):
     bucket_files[b] = sorted([f for f in os.listdir(SHARED_DIR)
                                if f.startswith(prefix) and f.endswith(".jpg")
                                and not f.startswith("._")])
-    print("  Bucket %d: %d images" % (b, len(bucket_files[b])))
 
 new_points = {
-    1: [0.475],
-    2: [0.425, 0.475, 0.525],
+    1: [0.475, 0.525, 0.55],
+    2: [0.425, 0.475],
     3: [0.475, 0.525],
-    4: [0.35, 0.45, 0.475],
-    5: [0.3, 0.35, 0.375, 0.425, 0.45, 0.475],
-    6: [0.3, 0.35, 0.45, 0.5, 0.55, 0.65, 0.7],
-    7: [0.3, 0.35, 0.45, 0.5, 0.55, 0.65, 0.7],
+    4: [0.45, 0.475, 0.525],
+    5: [0.45, 0.475, 0.525],
+    6: [0.5, 0.7],
+    7: [0.5, 0.7],
 }
 
 created = 0
 skipped = 0
 for b, t_values in sorted(new_points.items()):
-    print("\nBucket %d:" % b)
+    print("Bucket %d:" % b)
     for t_val in t_values:
         suffix = t_to_suffix(t_val)
         name = "celeba_v2b_b%d_T%s" % (b, suffix)
@@ -80,5 +66,4 @@ for b, t_values in sorted(new_points.items()):
                 f.write(json.dumps(a) + "\n")
         print("  CREATED: %s" % name)
         created += 1
-
 print("\nCreated: %d, Skipped: %d" % (created, skipped))
