@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Create v2b independence test datasets.
 
-Each dataset has: clean (b0) + B1 at specified T + B2 at specified T.
-Annotations sorted by filename for reproducibility (avoids symlink-ordering noise).
-
-Test 1 (pairwise best): B1=0.5, B2=0.55 — absorbed into Test 3 as cond_b1_T050
-Test 2 (shifts ±0.1):   4 configs varying both B1 and B2
-Test 3 (conditional):   B2 fixed at 0.55, sweep B1 across 9 points
+Each dataset includes ALL buckets (b0-b7, ~182K images) to match
+existing 2-domain format. Active buckets get their specified T;
+inactive buckets get T=0.999 (sigma_min≈12.28, never sampled).
+Annotations sorted by filename for reproducibility.
 """
 
 import os
@@ -18,6 +16,8 @@ from scipy.stats import norm
 PROCESSED_DIR = "/data/scratch/honjar/celeba_processed_v2b/shared_buckets_64"
 DATASET_DIR = "/data/scratch/honjar/annotated_datasets"
 TVEC_DIR = "/data/scratch/honjar/generated"
+ALL_BLUR_BUCKETS = [1, 2, 3, 4, 5, 6, 7]
+INACTIVE_T = 0.999  # matches existing 2-domain datasets
 
 
 def t_to_sigma_min(t):
@@ -25,17 +25,18 @@ def t_to_sigma_min(t):
     if t <= 0.0:
         return 0.0
     if t >= 1.0:
-        return float("inf")
+        t = INACTIVE_T  # cap to avoid infinity
     return float(np.exp(-1.2 + 1.2 * norm.ppf(t)))
 
 
 def create_dataset(name, bucket_t_map):
-    """Create a multi-bucket dataset.
+    """Create a multi-bucket dataset with ALL buckets included.
 
     Args:
         name: dataset directory name
-        bucket_t_map: {bucket_number: T_value} for active buckets (1-7).
-                      Clean (bucket 0) always included with sigma_min=0.
+        bucket_t_map: {bucket_number: T_value} for ACTIVE buckets.
+                      Buckets not listed get T=0.999 (inactive).
+                      Clean (bucket 0) always sigma_min=0.
     """
     ds_dir = os.path.join(DATASET_DIR, name)
     if os.path.exists(ds_dir):
@@ -43,20 +44,20 @@ def create_dataset(name, bucket_t_map):
         return False
 
     os.makedirs(ds_dir, exist_ok=True)
-
     annotations = []
 
-    # Clean images (bucket 0) — always sigma_min=0
-    clean_files = sorted(glob.glob(os.path.join(PROCESSED_DIR, "b0_*.png")))
+    # Clean images (bucket 0)
+    clean_files = sorted(glob.glob(os.path.join(PROCESSED_DIR, "b0_*.jpg")))
     for src in clean_files:
         fname = os.path.basename(src)
         os.symlink(src, os.path.join(ds_dir, fname))
         annotations.append({"filename": fname, "sigma_min": 0.0, "sigma_max": 0.0})
 
-    # Active blur buckets
-    for bucket, t_val in sorted(bucket_t_map.items()):
+    # All blur buckets (active at specified T, inactive at T=0.999)
+    for bucket in ALL_BLUR_BUCKETS:
+        t_val = bucket_t_map.get(bucket, INACTIVE_T)
         smin = t_to_sigma_min(t_val)
-        bucket_files = sorted(glob.glob(os.path.join(PROCESSED_DIR, f"b{bucket}_*.png")))
+        bucket_files = sorted(glob.glob(os.path.join(PROCESSED_DIR, f"b{bucket}_*.jpg")))
         for src in bucket_files:
             fname = os.path.basename(src)
             os.symlink(src, os.path.join(ds_dir, fname))
@@ -69,13 +70,14 @@ def create_dataset(name, bucket_t_map):
         for ann in annotations:
             f.write(json.dumps(ann) + "\n")
 
-    # Save T-vector sidecar for later analysis
-    tvec_path = os.path.join(TVEC_DIR, f"tvec_{name}.json")
-    tvec = {f"B{b}": t for b, t in sorted(bucket_t_map.items())}
-    with open(tvec_path, "w") as f:
+    # Save T-vector sidecar
+    tvec = {f"B{b}": bucket_t_map.get(b, INACTIVE_T) for b in ALL_BLUR_BUCKETS}
+    with open(os.path.join(TVEC_DIR, f"tvec_{name}.json"), "w") as f:
         json.dump(tvec, f, indent=2)
 
-    print(f"  Created {name}: {len(annotations)} images, config={tvec}")
+    n_active = sum(1 for b in ALL_BLUR_BUCKETS if b in bucket_t_map)
+    active_str = ", ".join(f"B{b}={bucket_t_map[b]}" for b in sorted(bucket_t_map))
+    print(f"  Created {name}: {len(annotations)} images, active: {active_str}")
     return True
 
 
@@ -88,29 +90,27 @@ def main():
     created = 0
 
     # --- Test 3: Conditional 1D sweep (B2=0.55 fixed, sweep B1) ---
-    # Test 1 (pairwise best) = the T050 point (B1=0.5, B2=0.55)
     print("Test 3 (conditional sweep, B2=0.55 fixed, sweep B1):")
     print("  [Test 1 = cond_b1_T050 = B1@0.5 + B2@0.55]")
     cond_t_values = [0.0, 0.2, 0.4, 0.45, 0.5, 0.55, 0.6, 0.8, 0.95]
     for t1 in cond_t_values:
         t_int = round(t1 * 1000)
         if t_int % 10 == 0:
-            suffix = f"T{t_int // 10:03d}"       # 3-digit: T000, T050, etc.
+            suffix = f"T{t_int // 10:03d}"
         else:
-            suffix = f"T{t_int:04d}"              # 4-digit: T0525, etc.
+            suffix = f"T{t_int:04d}"
         name = f"celeba_v2b_cond_b1_{suffix}"
         if create_dataset(name, {1: t1, 2: 0.55}):
             created += 1
 
-    # --- Test 2: Combinatorial shifts (±0.1 from best) ---
-    # B1 best=0.5, B2 best=0.55
+    # --- Test 2: Combinatorial shifts ---
     print()
     print("Test 2 (shifts):")
     shift_configs = [
-        ("bothup", {1: 0.6,   2: 0.65}),    # both shifted right +0.1
-        ("bothdn", {1: 0.4,   2: 0.45}),     # both shifted left  -0.1
-        ("apart",  {1: 0.4,   2: 0.65}),     # pushed further apart
-        ("close",  {1: 0.525, 2: 0.525}),    # both at midpoint
+        ("bothup", {1: 0.6,   2: 0.65}),
+        ("bothdn", {1: 0.4,   2: 0.45}),
+        ("apart",  {1: 0.4,   2: 0.65}),
+        ("close",  {1: 0.525, 2: 0.525}),
     ]
     for label, config in shift_configs:
         name = f"celeba_v2b_shift_{label}"
