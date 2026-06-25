@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Create v2b conditional sweep: B2 fixed at T=0.55, sweep B3.
-
-Tests whether "one bucket is enough" generalizes beyond B1.
-When B2 is active at its solo argmin, does B3 become redundant?
+Lysine-compatible paths.
 """
 
 import os
@@ -11,13 +9,13 @@ import glob
 import numpy as np
 from scipy.stats import norm
 
-PROCESSED_DIR = "/data/scratch/honjar/celeba_processed_v2b/shared_buckets_64"
-DATASET_DIR = "/data/scratch/honjar/annotated_datasets"
-TVEC_DIR = "/data/scratch/honjar/generated"
+PROCESSED_DIR = "/data/honjar/celeba_processed_v2b/shared_buckets_64"
+DATASET_DIR = "/data/honjar/annotated_datasets"
+TVEC_DIR = "/data/honjar/generated"
 ALL_BLUR_BUCKETS = [1, 2, 3, 4, 5, 6, 7]
 INACTIVE_T = 0.999
 
-B2_FIXED_T = 0.55  # B2's solo-optimal T
+B2_FIXED_T = 0.55
 
 
 def t_to_sigma_min(t):

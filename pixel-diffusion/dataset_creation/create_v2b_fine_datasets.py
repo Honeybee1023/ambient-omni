@@ -5,9 +5,9 @@ from scipy.stats import norm
 P_MEAN = -1.2
 P_STD = 1.2
 
-CELEBA_V2_ROOT = "/data/scratch/honjar/celeba_processed_v2b"
+CELEBA_V2_ROOT = "/data/honjar/celeba_processed_v2b"
 SHARED_DIR = os.path.join(CELEBA_V2_ROOT, "shared_buckets_64")
-ANNOTATED_DIR = "/data/scratch/honjar/annotated_datasets"
+ANNOTATED_DIR = "/data/honjar/annotated_datasets"
 N_BUCKETS = 8
 T_OFF_SIGMA_MIN = float(np.exp(P_STD * norm.ppf(0.999) + P_MEAN))
 
@@ -57,8 +57,7 @@ def create_dataset(name, t_vector, all_bucket_files):
             n_linked += 1
     with open(ann_path, "w") as f:
         for ann in annotations:
-            f.write(json.dumps(ann) + "
-")
+            f.write(json.dumps(ann) + "\n")
     active = []
     for b in range(1, N_BUCKETS):
         if t_vector[b] < 1.0:
