@@ -40,6 +40,59 @@ def apply_ema(data, window=3):
     return pd.Series(data).ewm(span=window, adjust=False).mean().values
 
 
+def compute_scheduled_sigma_min(t_schedule, progress):
+    """Compute sigma_min for corrupt images given schedule config and training progress [0,1].
+    
+    t_schedule: dict with keys 'type', 't_start', 't_end', and optionally 'switch_point'.
+    progress: float in [0, 1] representing fraction of training completed.
+    Returns: sigma_min value.
+    """
+    from scipy.stats import norm
+    P_MEAN, P_STD = -1.2, 1.2
+    
+    def t_to_sigma(t_val):
+        t_clipped = np.clip(t_val, 0.001, 0.999)
+        return float(np.exp(P_STD * norm.ppf(t_clipped) + P_MEAN))
+    
+    stype = t_schedule['type']
+    t_start = t_schedule.get('t_start', 0.0)
+    t_end = t_schedule.get('t_end', 0.75)
+    
+    if stype == 'static':
+        t_val = t_start
+    elif stype == 'linear':
+        t_val = t_start + (t_end - t_start) * progress
+    elif stype == 'step':
+        switch = t_schedule.get('switch_point', 0.5)
+        t_val = t_start if progress < switch else t_end
+    elif stype == 'cosine':
+        # Smooth cosine interpolation from t_start to t_end
+        t_val = t_start + (t_end - t_start) * (1 - np.cos(np.pi * progress)) / 2
+    elif stype == 'warmup_linear':
+        # Stay at t_start for warmup_frac, then linear to t_end
+        warmup_frac = t_schedule.get('warmup_frac', 0.25)
+        if progress < warmup_frac:
+            t_val = t_start
+        else:
+            t_val = t_start + (t_end - t_start) * (progress - warmup_frac) / (1 - warmup_frac)
+    elif stype == 'two_phase':
+        # Linear from t_start to t_mid for first half, then t_mid to t_end for second half
+        t_mid = t_schedule.get('t_mid', 0.5)
+        if progress < 0.5:
+            t_val = t_start + (t_mid - t_start) * (progress / 0.5)
+        else:
+            t_val = t_mid + (t_end - t_mid) * ((progress - 0.5) / 0.5)
+    elif stype == 'none':
+        # No masking at all (T=0 means sigma_min=0, use full range)
+        return 0.0
+    else:
+        raise ValueError(f"Unknown t_schedule type: {stype}")
+    
+    if t_val <= 0.001:
+        return 0.0
+    return t_to_sigma(t_val)
+
+
 def training_loop(
     run_dir             = '.',      # Output directory.
     dataset_kwargs      = {},       # Options for training set.
@@ -70,6 +123,7 @@ def training_loop(
     overwrite_cls_labels_path = None, # if not None, the labels are read from this file instead of the dataset
     crop_size           = None,
     sampler_kwargs = {},
+    t_schedule          = None,     # Dynamic T schedule config dict, None = use annotations as-is.
 ):
     # Initialize.
     start_time = time.time()
@@ -261,7 +315,21 @@ def training_loop(
     maintenance_time = tick_start_time - start_time
     dist.update_progress(cur_nimg // 1000, total_kimg)
     stats_jsonl = None
+    
+    # Identify corrupt filenames (sigma_min=999 placeholder) for dynamic T scheduling
+    corrupt_filenames = set()
+    if t_schedule is not None:
+        corrupt_filenames = {fname for fname, (smin, smax) in annotations.items() if smin >= 900}
+        dist.print0(f'Dynamic T schedule: {t_schedule}, corrupt images: {len(corrupt_filenames)}')
+    
     while True:
+
+        # Update dynamic T schedule
+        if t_schedule is not None and len(corrupt_filenames) > 0:
+            progress = cur_nimg / (total_kimg * 1000)
+            current_sigma_min = compute_scheduled_sigma_min(t_schedule, progress)
+            for fname in corrupt_filenames:
+                annotations[fname] = (current_sigma_min, 0.0)
 
         # Accumulate gradients.
         optimizer.zero_grad(set_to_none=True)

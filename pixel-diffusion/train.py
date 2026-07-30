@@ -97,6 +97,7 @@ def parse_int_list(s):
 
 # Sampler related
 @click.option('--s_max', help='s_max for the infinite sampler', type=float, default=None, show_default=True)
+@click.option('--t_schedule', help='Dynamic T schedule as JSON string, e.g. \'{"type":"linear","t_start":0,"t_end":0.75}\'', type=str, default=None)
 
 def main(**kwargs):
     """Train diffusion-based generative model using the techniques described in the
@@ -129,6 +130,7 @@ def main(**kwargs):
     c.cls_ema_window = opts.cls_ema_window
     c.overwrite_cls_labels_path = opts.overwrite_cls_labels_path
     c.crop_size = opts.crop_size
+    c.t_schedule = json.loads(opts.t_schedule) if opts.t_schedule else None
     c.dataset_kwargs = dnnlib.EasyDict(path=opts.data, use_labels=opts.cond, 
                                        cache=opts.cache,
                                        corruptions_dict=corruptions_dict,
