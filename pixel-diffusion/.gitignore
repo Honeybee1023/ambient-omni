@@ -166,3 +166,10 @@ cython_debug/
 *EVALS.txt
 noise_configs/
 *.ipynb
+
+# ===============================================================
+# lit_review/ IS TRACKED (as of 2026-07-31)
+# Contains our own research planning docs + paper summaries.
+# Intentionally version-controlled so agents on other machines
+# can read the full research context. Do not re-ignore.
+# ===============================================================
