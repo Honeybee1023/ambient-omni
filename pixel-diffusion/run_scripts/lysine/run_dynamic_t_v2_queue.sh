@@ -42,10 +42,18 @@ OUTDIR=/data/honjar/train_outputs/dynamic_t_v2
 GENDIR=/data/honjar/generated
 REF_CACHE=${GENDIR}/inception_holdout_feats.npz
 LOGDIR=/data/honjar/train_logs/dynamic_t_v2
+LOCKDIR=/data/honjar/train_logs/dynamic_t_v2/locks
 
-mkdir -p "$OUTDIR" "$LOGDIR"
+mkdir -p "$OUTDIR" "$LOGDIR" "$LOCKDIR"
 
 PORT_CTR=$((BASE_PORT + GPU * 100 + SEED * 10))
+
+# Release our locks if we are interrupted, so a restart can pick the work up.
+MY_LOCKS=()
+cleanup() {
+  for l in "${MY_LOCKS[@]:-}"; do [ -n "$l" ] && rmdir "$l" 2>/dev/null; done
+}
+trap cleanup EXIT INT TERM
 
 run_one() {
   local TAG=$1 DATASET=$2 SCHEDULE=$3
@@ -56,13 +64,40 @@ run_one() {
   local MIND_JSON="${GENDIR}/mind_${NAME}.json"
   local FID_JSON="${GENDIR}/fid_${NAME}.json"
   local LOG="${LOGDIR}/${NAME}.log"
+  local LOCK="${LOCKDIR}/${NAME}"
 
   if [ -f "$MIND_JSON" ]; then
     echo "SKIP (already done): $NAME"
     return 0
   fi
 
+  # Atomic claim: mkdir fails if another queue already owns this experiment,
+  # so several GPUs can share one queue definition without duplicating work.
+  if ! mkdir "$LOCK" 2>/dev/null; then
+    echo "SKIP (claimed by GPU $(cat "$LOCK/gpu" 2>/dev/null || echo '?')): $NAME"
+    return 0
+  fi
+  echo "$GPU" > "$LOCK/gpu"
+  echo "$$"   > "$LOCK/pid"
+  MY_LOCKS+=("$LOCK")
+
+  # Incremented here, not in the body: the body is a subshell, so a variable
+  # bumped there would not persist and every run would reuse the same port.
   PORT_CTR=$((PORT_CTR + 1))
+
+  # Body runs in a subshell so every exit path releases the lock below.
+  ( _run_one_body "$TAG" "$DATASET" "$SCHEDULE" "$NAME" "$RUNDIR" \
+                  "$CKPT" "$GEN_OUT" "$MIND_JSON" "$FID_JSON" "$LOG" )
+  local RC=$?
+  rm -f "$LOCK/gpu" "$LOCK/pid"
+  rmdir "$LOCK" 2>/dev/null
+  return $RC
+}
+
+_run_one_body() {
+  local TAG=$1 DATASET=$2 SCHEDULE=$3 NAME=$4 RUNDIR=$5
+  local CKPT=$6 GEN_OUT=$7 MIND_JSON=$8 FID_JSON=$9 LOG=${10}
+
   echo ""
   echo "=================================================================="
   echo "  $NAME   (GPU $GPU, seed $SEED)   started $(date '+%F %T')"
