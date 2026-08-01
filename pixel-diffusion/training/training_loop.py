@@ -245,6 +245,11 @@ def training_loop(
         print(f"Average max annotation: {np.mean([x[1] for x in annotations.values()])}")
         # print the average max annotation excluding values that are exactly 0
         print(f"Average max annotation excluding 0: {np.mean([x[1] for x in annotations.values() if x[1] != 0])}")
+    # NOTE: this must stay a plain dict -- `annotations` is a defaultdict backed
+    # by a lambda, which cannot be pickled when the dataset is sent to the
+    # DataLoader workers. It is a *copy*, so any later mutation of `annotations`
+    # must be mirrored here explicitly (see the dynamic-T block below); the
+    # sampler reads image eligibility from this dict, not from `annotations`.
     dataset_obj.annotations = dict(annotations)
     print('Rank', dist.get_rank(), 'Size', dist.get_world_size())
     print('Sampler kwargs', sampler_kwargs)
@@ -318,18 +323,38 @@ def training_loop(
     
     # Identify corrupt filenames (sigma_min=999 placeholder) for dynamic T scheduling
     corrupt_filenames = set()
+    sentinel_filenames = {fname for fname, (smin, smax) in annotations.items() if smin >= 900}
     if t_schedule is not None:
-        corrupt_filenames = {fname for fname, (smin, smax) in annotations.items() if smin >= 900}
+        corrupt_filenames = sentinel_filenames
         dist.print0(f'Dynamic T schedule: {t_schedule}, corrupt images: {len(corrupt_filenames)}')
-    
+        if len(corrupt_filenames) == 0:
+            raise ValueError(
+                '--t_schedule was given but the dataset contains no images annotated with the '
+                'sigma_min=999 sentinel. The schedule would have no effect; check the dataset.'
+            )
+    elif len(sentinel_filenames) > 0:
+        # Without a schedule the sentinel is never replaced, so these images can
+        # never be drawn by the sampler and the run silently degenerates to clean-only.
+        raise ValueError(
+            f'{len(sentinel_filenames)} images carry the sigma_min=999 sentinel but no '
+            '--t_schedule was provided. Refusing to train: these images would be unusable.'
+        )
+    last_scheduled_sigma_min = None
+
     while True:
 
         # Update dynamic T schedule
         if t_schedule is not None and len(corrupt_filenames) > 0:
             progress = cur_nimg / (total_kimg * 1000)
             current_sigma_min = compute_scheduled_sigma_min(t_schedule, progress)
-            for fname in corrupt_filenames:
-                annotations[fname] = (current_sigma_min, 0.0)
+            if current_sigma_min != last_scheduled_sigma_min:
+                for fname in corrupt_filenames:
+                    annotations[fname] = (current_sigma_min, 0.0)
+                    # Mirror into the dict the sampler reads, otherwise the
+                    # schedule only changes the loss weighting and never the
+                    # set of images eligible at the sampled sigma.
+                    dataset_obj.annotations[fname] = (current_sigma_min, 0.0)
+                last_scheduled_sigma_min = current_sigma_min
 
         # Accumulate gradients.
         optimizer.zero_grad(set_to_none=True)
