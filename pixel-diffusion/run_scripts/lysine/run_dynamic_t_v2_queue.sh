@@ -6,9 +6,18 @@
 # you can kill this and restart, or point it at another GPU to run the tail of
 # the queue in parallel.
 #
-#   ./run_scripts/lysine/run_dynamic_t_v2_queue.sh            # GPU 0, seed 0
-#   GPU=1 ./run_scripts/lysine/run_dynamic_t_v2_queue.sh      # GPU 1
-#   SEED=1 ./run_scripts/lysine/run_dynamic_t_v2_queue.sh     # second seed
+# ALWAYS LAUNCH THIS DETACHED FROM THE TERMINAL, e.g.
+#
+#     tmux new-session -d -s dynt 'GPU=0 ./run_scripts/lysine/run_dynamic_t_v2_queue.sh'
+#     tmux attach -t dynt        # to watch
+#
+# `nohup ... &` is NOT sufficient: torch.distributed.run installs its own
+# SIGHUP handler which overrides the disposition nohup inherits, so an SSH
+# disconnect kills training mid-run (this cost us a 3.5h run on 2026-07-31).
+# tmux/setsid put the job in a new session with no controlling terminal.
+#
+#   GPU=1 ...        # choose GPU
+#   SEED=1 ...       # additional seed
 #
 # Each experiment is ~9.2h of training on an A100 (16.5 sec/kimg x 2000 kimg)
 # plus ~20 min for generation and eval.
@@ -63,14 +72,27 @@ run_one() {
 
   # ---- train ----
   if [ ! -f "$CKPT" ]; then
-    rm -rf "$RUNDIR"
-    mkdir -p "$RUNDIR"
+    # Resume from the newest training-state dump if a previous attempt died
+    # partway (each run is ~9h, so losing one to a crash is expensive).
+    local RESUME=""
+    if [ -d "$RUNDIR" ]; then
+      local STATE
+      STATE=$(ls -1 "$RUNDIR"/training-state-*.pt 2>/dev/null | sort -V | tail -1)
+      if [ -n "$STATE" ]; then
+        RESUME="--resume=$STATE"
+        echo "  resuming from $(basename "$STATE")"
+      fi
+    fi
+    if [ -z "$RESUME" ]; then
+      rm -rf "$RUNDIR"
+      mkdir -p "$RUNDIR"
+    fi
     export MASTER_PORT=$PORT_CTR
     local CMD="$PY -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
       --outdir=$RUNDIR --nosubdir --data=$DATASET --expr_id=$NAME \
       --cond=0 --arch=ddpmpp --batch=64 --tick=50 --snap=5 --dump=5 \
       --corruption_probability=0.0 --noise_config=identity --s_max=4 \
-      --cache=False --duration=2 --seed=$SEED --workers=8"
+      --cache=False --duration=2 --seed=$SEED --workers=8 $RESUME"
     if [ -n "$SCHEDULE" ]; then
       CMD="$CMD --t_schedule='$SCHEDULE'"
     fi
