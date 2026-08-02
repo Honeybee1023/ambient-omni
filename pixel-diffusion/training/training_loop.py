@@ -93,6 +93,15 @@ def compute_scheduled_sigma_min(t_schedule, progress):
     return t_to_sigma(t_val)
 
 
+def sigma_min_to_t(sigma_min):
+    """Inverse of the T -> sigma_min mapping, for logging the schedule in T units."""
+    from scipy.stats import norm
+    P_MEAN, P_STD = -1.2, 1.2
+    if sigma_min <= 0:
+        return 0.0
+    return float(norm.cdf((np.log(sigma_min) - P_MEAN) / P_STD))
+
+
 def training_loop(
     run_dir             = '.',      # Output directory.
     dataset_kwargs      = {},       # Options for training set.
@@ -340,6 +349,11 @@ def training_loop(
             '--t_schedule was provided. Refusing to train: these images would be unusable.'
         )
     last_scheduled_sigma_min = None
+    current_sigma_min = 0.0
+    progress_t_value = 0.0
+    tick_corrupt_seen = 0
+    tick_batch_seen = 0
+    tick_corrupt_frac = float('nan')
 
     while True:
 
@@ -347,6 +361,7 @@ def training_loop(
         if t_schedule is not None and len(corrupt_filenames) > 0:
             progress = cur_nimg / (total_kimg * 1000)
             current_sigma_min = compute_scheduled_sigma_min(t_schedule, progress)
+            progress_t_value = sigma_min_to_t(current_sigma_min)
             if current_sigma_min != last_scheduled_sigma_min:
                 for fname in corrupt_filenames:
                     annotations[fname] = (current_sigma_min, 0.0)
@@ -406,6 +421,27 @@ def training_loop(
                 for bucket_idx in range(4):
                     training_stats.report(f'Loss/bucket_{bucket_idx}', loss[bucket_indices == bucket_idx])
 
+                # What fraction of the batch is corrupt data? For dynamic-T runs
+                # this is the schedule's actual effect: T controls eligibility, so
+                # raising T pushes this fraction down. Logged because a silent
+                # drop to ~0 is exactly how the sentinel bug hid for two rounds
+                # of experiments.
+                #
+                # NB the reported fraction lags the printed T slightly: the
+                # DataLoader prefetches num_workers*prefetch_factor*batch images
+                # (4096 at our settings), chosen under the previous threshold.
+                # That is 0.2% of a 2000-kimg run, but it dominates very short
+                # smoke tests, so don't read the first few ticks of those.
+                if len(corrupt_filenames) > 0:
+                    is_corrupt = torch.tensor(
+                        [1.0 if fn in corrupt_filenames else 0.0
+                         for fn in dataset_item['filename']], device=device)
+                    training_stats.report('Data/corrupt_fraction', is_corrupt)
+                    training_stats.report('Data/scheduled_sigma_min',
+                                          torch.full_like(is_corrupt, float(current_sigma_min)))
+                    tick_corrupt_seen += int(is_corrupt.sum().item())
+                    tick_batch_seen += is_corrupt.numel()
+
                 loss.sum().mul(loss_scaling / batch_gpu_total).backward()
 
         torch.nn.utils.clip_grad_norm_(ddp.parameters(), clip)
@@ -434,6 +470,9 @@ def training_loop(
 
         # Print status line, accumulating the same information in training_stats.
         tick_end_time = time.time()
+        tick_corrupt_frac = (tick_corrupt_seen / tick_batch_seen) if tick_batch_seen else float('nan')
+        tick_corrupt_seen = 0
+        tick_batch_seen = 0
         fields = []
         fields += [f"tick {training_stats.report0('Progress/tick', cur_tick):<5d}"]
         fields += [f"kimg {training_stats.report0('Progress/kimg', cur_nimg / 1e3):<9.1f}"]
@@ -444,6 +483,9 @@ def training_loop(
         fields += [f"cpumem {training_stats.report0('Resources/cpu_mem_gb', psutil.Process(os.getpid()).memory_info().rss / 2**30):<6.2f}"]
         fields += [f"gpumem {training_stats.report0('Resources/peak_gpu_mem_gb', torch.cuda.max_memory_allocated(device) / 2**30):<6.2f}"]
         fields += [f"reserved {training_stats.report0('Resources/peak_gpu_mem_reserved_gb', torch.cuda.max_memory_reserved(device) / 2**30):<6.2f}"]
+        if t_schedule is not None:
+            fields += [f"T {progress_t_value:<5.3f}"]
+            fields += [f"corrupt {tick_corrupt_frac:<5.3f}"]
         torch.cuda.reset_peak_memory_stats()
         dist.print0(' '.join(fields))
 
