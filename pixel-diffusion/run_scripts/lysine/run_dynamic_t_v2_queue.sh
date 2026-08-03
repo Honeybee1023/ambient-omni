@@ -27,6 +27,9 @@ set -u
 GPU=${GPU:-0}
 SEED=${SEED:-0}
 BASE_PORT=${BASE_PORT:-10900}
+# Space-separated tags to run; empty means "all". Used by the replication pass,
+# where re-running the arms that lost by a wide margin buys us nothing.
+ONLY=${ONLY:-}
 
 export CUDA_VISIBLE_DEVICES=$GPU
 export MASTER_ADDR=localhost
@@ -58,6 +61,11 @@ trap cleanup EXIT INT TERM
 run_one() {
   local TAG=$1 DATASET=$2 SCHEDULE=$3
   local NAME="v2_${TAG}_s${SEED}"
+
+  if [ -n "$ONLY" ] && [[ " $ONLY " != *" $TAG "* ]]; then
+    return 0
+  fi
+
   local RUNDIR="${OUTDIR}/${NAME}"
   local CKPT="${RUNDIR}/network-snapshot-002000.pkl"
   local GEN_OUT="${GENDIR}/${NAME}_5k_gen"
