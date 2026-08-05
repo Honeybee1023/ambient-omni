@@ -36,7 +36,15 @@ text-to-image/outputs
 # note dropped in any directory is ignored by default.
 # Do NOT un-ignore. Prefer adding a pattern here over trusting
 # yourself to remember at `git add` time.
+#
+# These are symlinks into ../ambient-omni-private-notes, so the
+# patterns are written WITHOUT a trailing slash: a trailing slash
+# matches directories only and would silently stop matching the
+# moment a directory became a symlink.
+# Restore the links with pixel-diffusion/scripts/restore_private_notes.sh
 # ===============================================================
+lit_review
+**/lit_review
 lit_review/
 **/lit_review/
 context.md
