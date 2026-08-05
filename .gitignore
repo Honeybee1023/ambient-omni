@@ -27,3 +27,27 @@ text-to-image/datadir/textcaps
 text-to-image/datadir/jdb
 text-to-image/datadir/diffdb
 text-to-image/outputs
+
+# ===============================================================
+# PRIVATE RESEARCH NOTES - this repository is PUBLIC.
+# Literature reviews, research plans, meeting notes and agent
+# handoff docs stay local. pixel-diffusion/.gitignore covers the
+# same names one level down; these are the repo-wide rules so a
+# note dropped in any directory is ignored by default.
+# Do NOT un-ignore. Prefer adding a pattern here over trusting
+# yourself to remember at `git add` time.
+# ===============================================================
+lit_review/
+**/lit_review/
+context.md
+**/context.md
+HANDOFF.md
+**/HANDOFF.md
+notes/
+**/notes/
+*_notes.md
+*_private.md
+meeting*.md
+**/meeting*.md
+research_plan*.md
+**/research_plan*.md
