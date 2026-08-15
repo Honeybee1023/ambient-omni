@@ -222,6 +222,31 @@ run_one step_0to050    "$DATA" '{"type":"step","t_start":0.0,"t_end":0.5,"switch
 run_one linear_050to0  "$DATA" '{"type":"linear","t_start":0.5,"t_end":0.0}'
 run_one twophase_0_050_095 "$DATA" '{"type":"two_phase","t_start":0.0,"t_mid":0.5,"t_end":0.95}'
 
+# --------------------------------------------------------------------------
+# 5. ROUND 3: is warmup winning on SHAPE, or just on feeding the model more
+#    corrupt data?
+#
+#    Round 2 could not tell these apart. Holding T=0 early keeps warmup's whole
+#    T curve below linear's, so more corrupt images stay eligible all run:
+#    warmup25 averaged 60.5% corrupt batches against 48.0% for linear. Warmup
+#    won, but "better shape" and "more corrupt data" both predict that.
+#
+#    5a varies warmup length, 5b varies the ceiling, and 5c is the control that
+#    actually separates the two: linear/cosine ending at T=0.7126 have the same
+#    mean T as warmup25 (0.3563, solved numerically), i.e. the same corrupt-data
+#    exposure with a different shape.
+#      - controls match warmup25 -> exposure is the whole story, shape is a
+#        red herring, and the real knob is just how much corrupt data
+#      - warmup25 still wins     -> the shape matters and holding T=0 early does
+#        something a smooth ramp cannot
+# --------------------------------------------------------------------------
+run_one warmup15_0to095 "$DATA" '{"type":"warmup_linear","t_start":0.0,"t_end":0.95,"warmup_frac":0.15}'
+run_one warmup40_0to095 "$DATA" '{"type":"warmup_linear","t_start":0.0,"t_end":0.95,"warmup_frac":0.40}'
+run_one linear_0to085   "$DATA" '{"type":"linear","t_start":0.0,"t_end":0.85}'
+run_one warmup25_0to085 "$DATA" '{"type":"warmup_linear","t_start":0.0,"t_end":0.85,"warmup_frac":0.25}'
+run_one linear_0to0713  "$DATA" '{"type":"linear","t_start":0.0,"t_end":0.7126}'
+run_one cosine_0to0713  "$DATA" '{"type":"cosine","t_start":0.0,"t_end":0.7126}'
+
 echo ""
 echo "###################################################################"
 echo "# QUEUE FINISHED $(date)"
