@@ -33,12 +33,29 @@ SCHED_PID="${STATE}/scheduler.pid"
 STOP_FLAG="${STATE}/STOP"
 MANIFEST="${AMBIENT_BASE}/generated/restr_sweep_manifest.json"
 
-GPUS="0 1 2 3"
-# A run settles at ~33GB but spikes to ~46.5GB reserved during the first tick,
-# so this is the honest floor. Starting below it risks OOMing our own job and,
-# worse, a neighbour's. On an 80GB A100 this means we take a card only when it
-# is genuinely idle or lightly used.
-MIN_FREE_MB=${MIN_FREE_MB:-50000}
+# GPUs are addressed by UUID, never by index. CUDA and nvidia-smi enumerate
+# differently when a session can only reach some of the cards: on proline a job
+# launched with CUDA_VISIBLE_DEVICES=0 lands on nvidia-smi index 1. Checking free
+# memory on index 0 and then launching onto a different physical card is how the
+# first attempt OOM'd against a neighbour. Both nvidia-smi --id= and
+# CUDA_VISIBLE_DEVICES accept a GPU-<uuid> string, so the UUID is the one handle
+# that means the same thing to the guard and to the job.
+GPUS=${GPUS:-$(nvidia-smi --query-gpu=uuid --format=csv,noheader 2>/dev/null | tr '\n' ' ')}
+# How many times a dataset may be attempted before it is left alone. Failures
+# here are usually a neighbour growing into the card rather than anything wrong
+# with the job, so it is worth retrying a few times over a multi-day run.
+MAX_ATTEMPTS=${MAX_ATTEMPTS:-4}
+# Off by default. Demanding an idle card sounds safer but deadlocks where the
+# only reachable GPUs are shared ones: on proline the two cards CUDA can address
+# both permanently host another user, while the two idle cards are unreachable.
+# Now that GPUs are addressed by UUID the free-memory check refers to the card
+# the job will actually land on, so a margin there is the real protection. Set
+# this to e.g. 10000 to insist on idle cards where that is affordable.
+FOREIGN_MAX_MB=${FOREIGN_MAX_MB:-100000000}
+# A run settles at ~33GB but spikes to ~46.5GB reserved during the first tick.
+# The margin above that is deliberate: on a shared card the neighbour keeps
+# allocating after we check, and an OOM costs hours of queue time.
+MIN_FREE_MB=${MIN_FREE_MB:-70000}
 POLL=${POLL:-60}
 # Small gap between two launches so four jobs do not hit the disk at once.
 STAGGER=${STAGGER:-45}
@@ -99,7 +116,90 @@ already_done() {
 
 free_mb() { nvidia-smi --id="$1" --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null || echo 0; }
 
-slot_busy() {   # $1 = gpu id
+# Memory held on a card by processes that are not ours. Returns 0 when the card
+# is idle or only we are on it.
+foreign_mb() {
+    local uuid=$1
+    local me total=0
+    me=$(id -u)
+    # gpu_uuid ties each compute process to a physical card unambiguously.
+    while IFS=, read -r u pid mem; do
+        u=$(echo "$u" | tr -d ' '); pid=$(echo "$pid" | tr -d ' ')
+        mem=$(echo "$mem" | tr -d ' ' | tr -dc '0-9')
+        [ "$u" = "$uuid" ] || continue
+        [ -n "$pid" ] && [ "$pid" != "[N/A]" ] || continue
+        local owner; owner=$(ps -o uid= -p "$pid" 2>/dev/null | tr -d ' ')
+        [ -n "$owner" ] || continue
+        [ "$owner" = "$me" ] && continue
+        total=$((total + ${mem:-0}))
+    done < <(nvidia-smi --query-compute-apps=gpu_uuid,pid,used_memory \
+             --format=csv,noheader,nounits 2>/dev/null)
+    echo "$total"
+}
+
+# nvidia-smi listing a GPU does not mean this session may use it: on proline
+# CUDA reports "No CUDA GPUs are available" for two of the four cards that
+# nvidia-smi happily reports as idle. Without this check the scheduler hands job
+# after job to a card that kills each one in seconds, draining the whole queue.
+# Cached, because it costs a couple of seconds per probe.
+gpu_usable() {
+    # Two statements on purpose: bash expands the whole `local` line before it
+    # assigns, so `local g=$1 marker=...${g}...` would expand ${g} from the outer
+    # scope and trip `set -u` when nothing there is called g.
+    local g=$1
+    local marker="${STATE}/.gpu$(echo "$g" | tr -c 'A-Za-z0-9' '_').usable"
+    # Cache the verdict, but let a negative expire: over a multi-day run a card
+    # this session cannot currently touch may become available, and a permanently
+    # cached "no" would leave it idle for the rest of the sweep.
+    if [ -f "$marker" ]; then
+        if [ "$(cat "$marker")" = "yes" ]; then return 0; fi
+        if [ -z "$(find "$marker" -mmin +60 2>/dev/null)" ]; then return 1; fi
+    fi
+    # Must actually allocate. torch.cuda.device_count() reports 1 even for cards
+    # this session cannot touch -- on proline it returns 1 for all four H200s
+    # while allocating on two of them raises "No CUDA GPUs are available".
+    local out
+    out=$(CUDA_VISIBLE_DEVICES="$g" "${AMBIENT_BASE}/miniconda3/envs/ambient/bin/python" -c \
+        "import torch
+try:
+    torch.zeros(256, 256, device='cuda'); print(1)
+except Exception:
+    print(0)" 2>/dev/null | tail -1)
+    if [ "$out" = "1" ]; then
+        echo yes > "$marker"; log "GPU $g is usable by CUDA"; return 0
+    fi
+    echo no > "$marker"
+    log "GPU $g is visible to nvidia-smi but NOT to CUDA -- excluding it"
+    return 1
+}
+
+# Runs one job detached, then records the outcome and puts the dataset back on
+# the queue if it failed and has attempts left. Kept as a subcommand rather than
+# an inline `bash -c` string so the quoting cannot silently break (an earlier
+# version wrote the literal text "$(date +%F_%T)" into failed.txt).
+cmd_wrap() {
+    local job=$1 gpu=$2 seed=$3 slot=${4:-0}
+    echo $$ > "${STATE}/gpu${slot}.pid"
+    bash "${REPO}/run_restr_job.sh" "$job" "$gpu" "$seed" "$slot"
+    local ec=$?
+    if [ "$ec" -eq 0 ]; then
+        echo "$job" >> "${STATE}/done.txt"
+    else
+        echo "$(date '+%F %T') $job gpu=$gpu exit=$ec" >> "${STATE}/failed.txt"
+        local tries; tries=$(grep -c "^${job}$" "${STATE}/started.txt" 2>/dev/null || echo 0)
+        if [ "$tries" -lt "${MAX_ATTEMPTS}" ]; then
+            # Back of the queue, not the front: a job that fails for its own
+            # reasons must not spin ahead of work that can still succeed.
+            (
+                flock -x 200
+                { cat "$QUEUE" 2>/dev/null; echo "$job"; } > "${QUEUE}.tmp" && mv "${QUEUE}.tmp" "$QUEUE"
+            ) 200>"$LOCK"
+            echo "$(date '+%F %T') requeued $job (attempt $tries/${MAX_ATTEMPTS})" >> "${STATE}/failed.txt"
+        fi
+    fi
+}
+
+slot_busy() {   # $1 = slot index
     local pf="${STATE}/gpu${1}.pid"
     [ -f "$pf" ] || return 1
     local pid; pid=$(cat "$pf" 2>/dev/null)
@@ -121,14 +221,21 @@ cmd_run() {
             break
         fi
 
-        local running=0 launched=0
+        local running=0 launched=0 slot=-1
         for gpu in $GPUS; do
-            if slot_busy "$gpu"; then running=$((running+1)); continue; fi
+            slot=$((slot+1))
+            if slot_busy "$slot"; then running=$((running+1)); continue; fi
 
             [ -s "$QUEUE" ] || continue
 
             local fm; fm=$(free_mb "$gpu")
             if [ "${fm:-0}" -lt "$MIN_FREE_MB" ]; then continue; fi
+
+            # Probe before popping, so an unusable card never consumes a job.
+            gpu_usable "$gpu" || continue
+
+            local fgn; fgn=$(foreign_mb "$gpu")
+            if [ "${fgn:-0}" -gt "$FOREIGN_MAX_MB" ]; then continue; fi
 
             local job; job=$(pop_next)
             [ -n "$job" ] || continue
@@ -139,15 +246,11 @@ cmd_run() {
                 continue
             fi
 
-            log "launch $job on GPU $gpu (${fm}MB free)"
+            log "launch $job on $gpu (${fm}MB free, ${fgn}MB foreign)"
             echo "$job" >> "${STATE}/started.txt"
-            setsid nohup bash -c "
-                bash '${REPO}/run_restr_job.sh' '$job' '$gpu' '$SEED'
-                ec=\$?
-                if [ \$ec -eq 0 ]; then echo '$job' >> '${STATE}/done.txt'
-                else echo '\$(date +%F_%T) $job exit=\$ec' >> '${STATE}/failed.txt'; fi
-            " > "${LOGDIR}/${job}.log" 2>&1 &
-            echo $! > "${STATE}/gpu${gpu}.pid"
+            setsid nohup bash "${REPO}/run_restr_sweep_queue.sh" wrap "$job" "$gpu" "$SEED" "$slot" \
+                > "${LOGDIR}/${job}.log" 2>&1 &
+            echo $! > "${STATE}/gpu${slot}.pid"
             running=$((running+1)); launched=$((launched+1))
             sleep "$STAGGER"
         done
@@ -240,6 +343,20 @@ case "${1:-}" in
     init)   cmd_init ;;
     start)  cmd_start ;;
     run)    cmd_run ;;
+    wrap)   cmd_wrap "$2" "$3" "${4:-0}" ;;
+    probe)  # why each GPU is or is not eligible right now
+            printf "%-6s %-10s %-10s %-6s %s\n" SMI_IDX FREE_MB FOREIGN_MB CUDA ELIGIBLE
+            for g in $GPUS; do
+                idx=$(nvidia-smi --query-gpu=index,uuid --format=csv,noheader 2>/dev/null \
+                      | awk -F', ' -v u="$g" '$2==u{print $1}')
+                fm=$(free_mb "$g"); fg=$(foreign_mb "$g")
+                if gpu_usable "$g" >/dev/null 2>&1; then cu=yes; else cu=NO; fi
+                el=yes
+                [ "$cu" = "NO" ] && el="no (CUDA cannot see it)"
+                [ "$el" = "yes" ] && [ "${fm:-0}" -lt "$MIN_FREE_MB" ] && el="no (needs ${MIN_FREE_MB}MB free)"
+                [ "$el" = "yes" ] && [ "${fg:-0}" -gt "$FOREIGN_MAX_MB" ] && el="no (another user holds ${fg}MB)"
+                printf "%-6s %-10s %-10s %-6s %s\n" "${idx:-?}" "$fm" "$fg" "$cu" "$el"
+            done ;;
     status) cmd_status ;;
     stop)   cmd_stop ;;
     *) echo "usage: $0 {init|start|status|stop}" >&2; exit 2 ;;

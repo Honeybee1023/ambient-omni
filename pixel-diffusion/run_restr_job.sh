@@ -21,8 +21,12 @@ AMBIENT_BASE="${AMBIENT_BASE:-/data/scratch/honjar}"
 export AMBIENT_BASE
 
 DATASET_NAME=${1:-}
+# A GPU-<uuid> string, not an index: CUDA and nvidia-smi enumerate cards
+# differently when only some are reachable, so an index means different things to
+# the scheduler's memory check and to this job. Both accept a UUID.
 GPU_ID=${2:-}
 TRAIN_SEED=${3:-0}
+SLOT=${4:-0}
 
 if [ -z "$DATASET_NAME" ] || [ -z "$GPU_ID" ]; then
     echo "Usage: bash run_restr_job.sh <dataset_name> <gpu_id> [seed]"
@@ -36,7 +40,10 @@ export HF_HOME=${AMBIENT_BASE}/.cache/huggingface
 export TORCH_HOME=${AMBIENT_BASE}/.cache/torch
 export MASTER_ADDR=localhost
 # Derived from the GPU id so four concurrent jobs cannot collide on a port.
-export MASTER_PORT=$((29500 + GPU_ID * 7 + RANDOM % 5))
+export MASTER_PORT=$((29500 + SLOT * 7 + RANDOM % 5))
+# Cuts fragmentation, which is what turns a tight-but-sufficient card into an OOM
+# when a neighbour is also growing.
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 if [ -f "${AMBIENT_BASE}/.wandb_key" ]; then
     export WANDB_API_KEY=$(cat "${AMBIENT_BASE}/.wandb_key")
@@ -54,7 +61,8 @@ OUTDIR="${BASE}/generated/${DATASET_NAME}_2000kimg"
 MIND_JSON="${BASE}/generated/mind_${DATASET_NAME}_2000kimg.json"
 VALLOSS_JSON="${BASE}/generated/valloss_${DATASET_NAME}_2000kimg.json"
 
-echo "=== $DATASET_NAME | GPU $GPU_ID | seed $TRAIN_SEED | $(date) ==="
+echo "=== $DATASET_NAME | GPU $GPU_ID (slot $SLOT) | seed $TRAIN_SEED | $(date) ==="
+nvidia-smi --id="$GPU_ID" --query-gpu=index,uuid,memory.free --format=csv,noheader 2>/dev/null
 
 # --- Train (auto-resume from the newest training-state if one exists) ---
 if [ -f "$MIND_JSON" ] && [ -f "$VALLOSS_JSON" ]; then
