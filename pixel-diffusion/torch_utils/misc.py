@@ -155,10 +155,21 @@ class InfiniteSampler(torch.utils.data.Sampler):
                     sample_annotation = (sample_annotation, 0.0)
                 sample_sigma_min = sample_annotation[0]
                 sample_sigma_max = sample_annotation[1]
+                # Optional third field: the upper edge of an exclusive noise band.
+                # The two fields above are OR'd, so neither can ever *narrow*
+                # eligibility -- sigma_max only adds a low-noise window (ambient-crops).
+                # A restricted bucket needs the opposite: usable strictly inside
+                # [sigma_min, band_max) and nowhere else. Annotations that omit the
+                # field get +inf, which leaves the historical gating bit-identical.
+                sample_band_max = sample_annotation[2] if len(sample_annotation) > 2 else float('inf')
                 # print(filename, sample_sigma_min, sample_sigma_max, sigma, (not self.keep_schedule) or (sigma > sample_sigma_min*self.buffer_factor or sigma < sample_sigma_max))
                 # assert False
 
-                if (sigma > sample_sigma_min*self.buffer_factor) or (sigma < sample_sigma_max):
+                # The band edge carries the same buffer factor as the lower edge so
+                # that consecutive buckets tile the sigma axis exactly: bucket k gets
+                # [sigma_k*b, sigma_k+1*b) and bucket k+1 starts at sigma_k+1*b.
+                if ((sigma > sample_sigma_min*self.buffer_factor) or (sigma < sample_sigma_max)) \
+                        and (sigma < sample_band_max*self.buffer_factor):
                     self.sampled_sigmas[filename] = sigma
                     # print('yielding')
                     yield order[i]

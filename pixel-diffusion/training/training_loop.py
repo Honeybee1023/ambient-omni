@@ -234,7 +234,15 @@ def training_loop(
                 elif "annotation" in line_json or "sigma" in line_json:
                     annotations[filename] = (line_json["annotation"], 0.) if "annotation" in line_json else (line_json["sigma"], 0)
                 elif "sigma_min" in line_json and "sigma_max" in line_json:
-                    annotations[filename] = (line_json["sigma_min"], line_json["sigma_max"])
+                    # `sigma_band_max` (optional) restricts the image to the noise band
+                    # [sigma_min, sigma_band_max) instead of [sigma_min, inf). Datasets
+                    # written before restricted buckets existed omit it and stay 2-tuples,
+                    # so their gating is unchanged. See InfiniteSampler in torch_utils/misc.py.
+                    if "sigma_band_max" in line_json:
+                        annotations[filename] = (line_json["sigma_min"], line_json["sigma_max"],
+                                                 line_json["sigma_band_max"])
+                    else:
+                        annotations[filename] = (line_json["sigma_min"], line_json["sigma_max"])
                 else:
                     raise ValueError(f"Could not parse line {line}")
     
@@ -332,8 +340,18 @@ def training_loop(
     
     # Identify corrupt filenames (sigma_min=999 placeholder) for dynamic T scheduling
     corrupt_filenames = set()
-    sentinel_filenames = {fname for fname, (smin, smax) in annotations.items() if smin >= 900}
+    # Indexed rather than destructured: restricted-bucket annotations are 3-tuples.
+    sentinel_filenames = {fname for fname, ann in annotations.items() if ann[0] >= 900}
     if t_schedule is not None:
+        # The schedule rewrites annotations as plain (sigma_min, 0.0) pairs below, which
+        # would silently drop any band and turn a restricted bucket back into an
+        # overlapping one. Refuse rather than train something other than what was asked.
+        if any(len(ann) > 2 for ann in annotations.values()):
+            raise ValueError(
+                '--t_schedule cannot be combined with restricted-bucket annotations '
+                '(sigma_band_max): the schedule would overwrite the band and the run '
+                'would silently revert to overlapping buckets.'
+            )
         corrupt_filenames = sentinel_filenames
         dist.print0(f'Dynamic T schedule: {t_schedule}, corrupt images: {len(corrupt_filenames)}')
         if len(corrupt_filenames) == 0:
