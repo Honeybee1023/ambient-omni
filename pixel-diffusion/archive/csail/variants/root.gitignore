@@ -1,0 +1,29 @@
+.DS_Store
+__pycache__/
+*logs/
+*slurm_logs*
+*job_logs
+*wandb*
+guided-diffusion/*
+
+# pixel-diffusion
+pixel-diffusion/outputs/
+pixel-diffusion/data/
+
+pixel-diffusion/slurm/
+pixel-diffusion/slurm_logs/
+
+pixel-diffusion/ambient-syn-evals
+pixel-diffusion/ambient-syn-runs
+data_softlink
+
+# latent-diffusion
+latent-diffusion/outputs
+
+# text-to-image
+text-to-image/datadir/sa1b
+text-to-image/datadir/cc12m
+text-to-image/datadir/textcaps
+text-to-image/datadir/jdb
+text-to-image/datadir/diffdb
+text-to-image/outputs
