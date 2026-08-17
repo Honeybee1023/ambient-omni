@@ -20,8 +20,9 @@ Usage:  python analyze_restricted_sweeps.py
 # than imported from ambient_paths because these scripts run from varying
 # depths and cwds, where an import would need sys.path surgery.
 import os as _os
-AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
-    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or next(
+    (_p for _p in ("/data-local/honjar", "/var/local/honjar", "/data/scratch/honjar")
+     if _os.path.isdir(_p)), "/data/scratch/honjar"
 )
 
 import os, json, glob
@@ -134,7 +135,15 @@ def main():
         print("-" * 78)
         print(f"{'T':>7}  {'restricted':>11}  {'overlapping':>12} {'n':>3}  {'delta':>10}   note")
 
-        base_fixed = data.get(1.0)        # fixed bucket solo
+        # Fixed-bucket-solo baseline. restr_b3_T100 and restr_b4_T100 are the same
+        # configuration by construction (b2 banded to [sigma(0.55), sigma(0.999)),
+        # every other bucket inactive), so only b3_T100 is trained and the b4 sweep
+        # borrows it rather than repeating the run.
+        base_fixed = data.get(1.0)
+        shared = False
+        if base_fixed is None and label == "b4":
+            base_fixed = restr.get("b3", {}).get(1.0)
+            shared = base_fixed is not None
         base_swept = data.get(t_fixed)    # swept bucket solo
 
         for t in sorted(data):
@@ -157,7 +166,8 @@ def main():
             best = interior[best_t]
             gain = base_fixed - best
             print(f"\n  best interior point : T={best_t:.3f}  MIND={best:.6f}")
-            print(f"  fixed bucket solo   : MIND={base_fixed:.6f}")
+            print(f"  fixed bucket solo   : MIND={base_fixed:.6f}"
+                  + ("   (shared with the b3 sweep -- same config)" if shared else ""))
             if base_swept is not None:
                 print(f"  swept bucket solo   : MIND={base_swept:.6f}")
             # Bar to clear: the spread between repeated runs of one configuration

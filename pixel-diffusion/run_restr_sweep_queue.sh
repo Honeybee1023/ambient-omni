@@ -17,7 +17,12 @@
 
 set -u
 
-AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+for _c in /data-local/honjar /var/local/honjar /data/scratch/honjar; do
+    [ -n "${AMBIENT_BASE:-}" ] && break
+    [ -d "$_c" ] && AMBIENT_BASE="$_c"
+done
+AMBIENT_BASE="${AMBIENT_BASE:-/data/scratch/honjar}"
+export AMBIENT_BASE
 REPO="${AMBIENT_BASE}/ambient-omni/pixel-diffusion"
 STATE="${AMBIENT_BASE}/restr_sweep_state"
 QUEUE="${STATE}/queue.txt"

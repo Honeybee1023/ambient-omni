@@ -31,8 +31,9 @@ rather than against the older JSON: B2-only@0.55 was recorded twice before, as
 # than imported from ambient_paths because these scripts run from varying
 # depths and cwds, where an import would need sys.path surgery.
 import os as _os
-AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
-    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or next(
+    (_p for _p in ("/data-local/honjar", "/var/local/honjar", "/data/scratch/honjar")
+     if _os.path.isdir(_p)), "/data/scratch/honjar"
 )
 
 import os, json, glob
