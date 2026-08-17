@@ -11,7 +11,7 @@ AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/ho
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --job-name=bsearch
-#SBATCH --output=${AMBIENT_BASE}/train_logs/%j_bsearch.out
+#SBATCH --output=/data/scratch/honjar/train_logs/%j_bsearch.out
 #SBATCH --requeue
 
 DATASET_NAME=$1

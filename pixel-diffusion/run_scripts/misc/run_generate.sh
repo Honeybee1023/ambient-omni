@@ -11,7 +11,7 @@ AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/ho
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
 #SBATCH --job-name=generate
-#SBATCH --output=${AMBIENT_BASE}/train_logs/generate_%j.out
+#SBATCH --output=/data/scratch/honjar/train_logs/generate_%j.out
 
 CHECKPOINT=$1
 OUTDIR=$2

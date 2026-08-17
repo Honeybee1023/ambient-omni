@@ -81,6 +81,17 @@ anything. In new Python code, prefer the module:
 from ambient_paths import GENERATED, DATASETS, OUTPUTS
 ```
 
+### One exception: `#SBATCH` directives
+
+`sbatch` reads `#SBATCH` lines itself before any shell runs, and does **not**
+expand shell variables in them. `#SBATCH --output=${AMBIENT_BASE}/...` writes to
+a directory literally named `${AMBIENT_BASE}`. Those lines therefore keep the
+literal CSAIL path, which is correct because Slurm only exists on CSAIL —
+lysine runs jobs under plain `tmux`.
+
+Everything below the `#SBATCH` block is ordinary shell and uses `$AMBIENT_BASE`
+as normal.
+
 **Do not commit a literal `/data/...` path.** It will be correct on exactly one
 machine. On a new machine, or to override detection, create `env.local.sh` next
 to `env.sh` (it is gitignored) with `AMBIENT_BASE=/your/path`.

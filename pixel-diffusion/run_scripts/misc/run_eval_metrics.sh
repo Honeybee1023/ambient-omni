@@ -11,7 +11,7 @@ AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/ho
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --job-name=eval_metrics
-#SBATCH --output=${AMBIENT_BASE}/train_logs/%j_eval_metrics.out
+#SBATCH --output=/data/scratch/honjar/train_logs/%j_eval_metrics.out
 
 export PATH=${AMBIENT_BASE}/miniconda3/envs/ambient/bin:$PATH
 export HF_HOME=${AMBIENT_BASE}/.cache/huggingface

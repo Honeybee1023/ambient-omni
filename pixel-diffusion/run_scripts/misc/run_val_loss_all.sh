@@ -11,7 +11,7 @@ AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/ho
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --job-name=val_loss
-#SBATCH --output=${AMBIENT_BASE}/train_logs/%j_val_loss.out
+#SBATCH --output=/data/scratch/honjar/train_logs/%j_val_loss.out
 #SBATCH --requeue
 
 export PATH=${AMBIENT_BASE}/miniconda3/envs/ambient/bin:$PATH

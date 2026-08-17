@@ -11,7 +11,7 @@ AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/ho
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
 #SBATCH --job-name=eval_fid
-#SBATCH --output=${AMBIENT_BASE}/train_logs/fid_%j.out
+#SBATCH --output=/data/scratch/honjar/train_logs/fid_%j.out
 
 export PATH=${AMBIENT_BASE}/miniconda3/envs/ambient/bin:$PATH
 export PYTHONPATH=${AMBIENT_BASE}/ambient-omni/pixel-diffusion

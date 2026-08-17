@@ -11,7 +11,7 @@ AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/ho
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
 #SBATCH --job-name=classify_wolves
-#SBATCH --output=${AMBIENT_BASE}/ambient-omni/pixel-diffusion/classify_wolves_%j.out
+#SBATCH --output=/data/scratch/honjar/ambient-omni/pixel-diffusion/classify_wolves_%j.out
 
 echo "Job started on $(hostname)"
 
