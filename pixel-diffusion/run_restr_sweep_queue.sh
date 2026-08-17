@@ -55,7 +55,9 @@ FOREIGN_MAX_MB=${FOREIGN_MAX_MB:-100000000}
 # A run settles at ~33GB but spikes to ~46.5GB reserved during the first tick.
 # The margin above that is deliberate: on a shared card the neighbour keeps
 # allocating after we check, and an OOM costs hours of queue time.
-MIN_FREE_MB=${MIN_FREE_MB:-70000}
+# Empty when unset, meaning "derive per card" (see min_free_for below). An
+# explicit value overrides for every GPU.
+MIN_FREE_MB=${MIN_FREE_MB:-}
 POLL=${POLL:-60}
 # Small gap between two launches so four jobs do not hit the disk at once.
 STAGGER=${STAGGER:-45}
@@ -110,11 +112,38 @@ requeue() {   # put a job back on the front, for transient failures
 }
 
 already_done() {
-    [ -f "${AMBIENT_BASE}/generated/mind_${1}_2000kimg.json" ] && \
-    [ -f "${AMBIENT_BASE}/generated/valloss_${1}_2000kimg.json" ]
+    if [ -f "${AMBIENT_BASE}/generated/mind_${1}_2000kimg.json" ] && \
+       [ -f "${AMBIENT_BASE}/generated/valloss_${1}_2000kimg.json" ]; then
+        return 0
+    fi
+    # Work finished on another machine. The two schedulers share no filesystem,
+    # so neither can see the other's results; without this they would both train
+    # whatever is left in the middle of the queue. Refresh from the machine that
+    # is ahead, e.g. from the Mac which can reach both:
+    #   ssh <other> 'ls $BASE/generated/mind_celeba_v2b_restr_*_2000kimg.json' \
+    #     | xargs -n1 basename | sed 's/^mind_//; s/_2000kimg\.json$//' \
+    #     | ssh <this> 'cat >> '"$STATE"'/done_elsewhere.txt'
+    if [ -f "${STATE}/done_elsewhere.txt" ] && grep -qx "$1" "${STATE}/done_elsewhere.txt"; then
+        return 0
+    fi
+    return 1
 }
 
 free_mb() { nvidia-smi --id="$1" --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null || echo 0; }
+
+# How much free memory this particular card must have before we take it. A run
+# settles near 33GB but spikes to ~46.5GB reserved on the first tick, so 55GB is
+# the floor anywhere. On a larger card ask for half of it instead: there the
+# neighbours are larger too, and an OOM costs hours of queue time. A fixed number
+# cannot serve both -- 70GB is right for a 143GB H200 but would mean an 80GB A100
+# never qualifies at all.
+min_free_for() {
+    if [ -n "$MIN_FREE_MB" ]; then echo "$MIN_FREE_MB"; return; fi
+    local total; total=$(nvidia-smi --id="$1" --query-gpu=memory.total \
+        --format=csv,noheader,nounits 2>/dev/null || echo 0)
+    local half=$(( ${total:-0} / 2 ))
+    if [ "$half" -gt 55000 ]; then echo "$half"; else echo 55000; fi
+}
 
 # Memory held on a card by processes that are not ours. Returns 0 when the card
 # is idle or only we are on it.
@@ -211,7 +240,7 @@ slot_busy() {   # $1 = slot index
 # ------------------------------------------------------------ scheduler ------
 
 cmd_run() {
-    log "scheduler up (pid $$) | min_free=${MIN_FREE_MB}MB poll=${POLL}s seed=${SEED}"
+    log "scheduler up (pid $$) | min_free=${MIN_FREE_MB:-per-card}MB poll=${POLL}s seed=${SEED}"
     log "queue: $(wc -l < "$QUEUE" 2>/dev/null || echo 0) pending"
     local idle_notice=0
 
@@ -228,8 +257,8 @@ cmd_run() {
 
             [ -s "$QUEUE" ] || continue
 
-            local fm; fm=$(free_mb "$gpu")
-            if [ "${fm:-0}" -lt "$MIN_FREE_MB" ]; then continue; fi
+            local fm need; fm=$(free_mb "$gpu"); need=$(min_free_for "$gpu")
+            if [ "${fm:-0}" -lt "$need" ]; then continue; fi
 
             # Probe before popping, so an unusable card never consumes a job.
             gpu_usable "$gpu" || continue
@@ -265,7 +294,7 @@ cmd_run() {
         if [ "$launched" -eq 0 ] && [ "$running" -eq 0 ] && [ "$pending" -gt 0 ]; then
             idle_notice=$((idle_notice+1))
             if [ $((idle_notice % 30)) -eq 1 ]; then
-                log "waiting for capacity: $pending pending, GPU free MB = [$(for g in $GPUS; do printf '%s ' "$(free_mb $g)"; done)] need ${MIN_FREE_MB}"
+                log "waiting for capacity: $pending pending, GPU free MB = [$(for g in $GPUS; do printf '%s/%s ' "$(free_mb $g)" "$(min_free_for $g)"; done)]"
             fi
         else
             idle_notice=0
@@ -353,7 +382,8 @@ case "${1:-}" in
                 if gpu_usable "$g" >/dev/null 2>&1; then cu=yes; else cu=NO; fi
                 el=yes
                 [ "$cu" = "NO" ] && el="no (CUDA cannot see it)"
-                [ "$el" = "yes" ] && [ "${fm:-0}" -lt "$MIN_FREE_MB" ] && el="no (needs ${MIN_FREE_MB}MB free)"
+                nd=$(min_free_for "$g")
+                [ "$el" = "yes" ] && [ "${fm:-0}" -lt "$nd" ] && el="no (needs ${nd}MB free)"
                 [ "$el" = "yes" ] && [ "${fg:-0}" -gt "$FOREIGN_MAX_MB" ] && el="no (another user holds ${fg}MB)"
                 printf "%-6s %-10s %-10s %-6s %s\n" "${idx:-?}" "$fm" "$fg" "$cu" "$el"
             done ;;
