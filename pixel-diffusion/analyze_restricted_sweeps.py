@@ -28,24 +28,43 @@ import os, json, glob
 
 GENERATED = f"{AMBIENT_BASE}/generated"
 
-# --- Reference: the overlapping conditional sweeps, from v2b_all_results.json ---
-# Copied in rather than read, because that file lives on CSAIL and this runs on
-# lysine. Keep in sync with $AMBIENT_BASE/generated/v2b_all_results.json.
+# --- Reference: the overlapping conditional sweeps, as (mean, n) per T ---
+# Pooled from every run of each configuration across lysine, CSAIL and proline,
+# deduplicated by filename. proline (/var/local/honjar) holds the _r2/_r3 reruns
+# and is where most of the b3/b4/b5 replication lives; v2b_all_results.json alone
+# carries only the first run of each point and is NOT sufficient here.
+#
+# Averaged, no second bucket beats its own baseline by even one sd -- which is
+# the redundancy this experiment exists to explain. Single runs suggested
+# interior optima for b3/b4; that was noise.
 COND = {
-    "b3": {0.0: 0.035958, 0.2: 0.036571, 0.4: 0.034723, 0.45: 0.034215, 0.5: 0.031498,
-           0.55: 0.031099, 0.6: 0.032279, 0.8: 0.032166, 1.0: 0.032623},
-    "b4": {0.0: 0.036509, 0.2: 0.035866, 0.4: 0.033055, 0.45: 0.032723, 0.5: 0.032217,
-           0.525: 0.032454, 0.55: 0.032471, 0.6: 0.032918, 0.7: 0.032021,
-           0.8: 0.030852, 0.9: 0.031673},
-    "b2": {0.0: 0.036033, 0.2: 0.034300, 0.3: 0.033382, 0.4: 0.033216, 0.45: 0.032800,
-           0.5: 0.031355, 0.525: 0.031317, 0.55: 0.030982, 0.575: 0.033119,
-           0.6: 0.031427, 0.65: 0.030644, 0.7: 0.030748, 0.8: 0.032183,
-           0.9: 0.030818, 0.95: 0.032249, 0.99: 0.030772, 1.0: 0.030296},
+    "b3": {0.0: (0.035958, 1), 0.2: (0.036571, 1), 0.4: (0.034723, 1),
+           0.45: (0.033354, 2), 0.5: (0.031896, 2), 0.525: (0.032405, 1),
+           0.55: (0.031818, 3), 0.575: (0.032742, 1), 0.6: (0.032897, 2),
+           0.7: (0.032441, 1), 0.8: (0.032166, 1), 1.0: (0.032623, 1)},
+    "b4": {0.0: (0.036509, 1), 0.2: (0.035866, 1), 0.4: (0.033055, 1),
+           0.45: (0.032723, 1), 0.5: (0.032217, 1), 0.525: (0.033098, 2),
+           0.55: (0.032471, 1), 0.6: (0.032918, 1), 0.7: (0.031669, 2),
+           0.75: (0.032456, 1), 0.8: (0.031439, 3), 0.85: (0.032124, 2),
+           0.9: (0.032245, 2)},
+    "b2": {0.0: (0.036033, 1), 0.2: (0.034300, 1), 0.3: (0.033382, 1),
+           0.4: (0.033216, 1), 0.45: (0.032800, 1), 0.5: (0.031355, 1),
+           0.525: (0.031317, 1), 0.55: (0.030982, 1), 0.575: (0.033119, 1),
+           0.6: (0.031427, 1), 0.65: (0.030644, 1), 0.7: (0.030748, 1),
+           0.8: (0.032183, 1), 0.9: (0.030818, 1), 0.95: (0.032249, 1),
+           0.99: (0.030772, 1), 1.0: (0.030296, 1)},
 }
 
-# Solo-sweep values for the same single-bucket configurations the degenerate ends
-# reproduce. Where a config was measured twice, both are listed -- the spread is
-# the point.
+# Spread between repeated runs of the same configuration, averaged over the T
+# values that actually got reruns. This is the bar a difference has to clear.
+# (Meeting prep quotes 0.00104 pooled across the dynamic-T arms -- same order.)
+POOLED_SD = {"b3": 0.000857, "b4": 0.000662, "b2": 0.000857}
+
+# Single-bucket configurations that the degenerate ends of each sweep reproduce.
+# Every one of these is thinly measured -- note in particular that no T=1.0
+# baseline in the conditional sweeps was ever replicated, so the published
+# "the extra bucket is redundant" compares a 3-run mean against a single run.
+# Re-measuring them in-batch is the point of the degenerate endpoints.
 SOLO = {
     ("b3", 0.55): [0.031825],                 # b3 solo @0.55
     ("b3", 1.0): [0.031144, 0.032623],        # b2 solo @0.55, measured twice
@@ -113,21 +132,23 @@ def main():
         print("\n" + "-" * 78)
         print(f"{title}   [restricted vs overlapping]")
         print("-" * 78)
-        print(f"{'T':>7}  {'restricted':>11}  {'overlapping':>12}  {'delta':>10}   note")
+        print(f"{'T':>7}  {'restricted':>11}  {'overlapping':>12} {'n':>3}  {'delta':>10}   note")
 
         base_fixed = data.get(1.0)        # fixed bucket solo
         base_swept = data.get(t_fixed)    # swept bucket solo
 
         for t in sorted(data):
             r = data[t]
-            c = COND[label].get(t)
+            ref = COND[label].get(t)
+            c, n = ref if ref else (None, 0)
             delta = (r - c) if c is not None else None
             note = ""
             if t >= 1.0:
                 note = "fixed bucket solo (baseline)"
             elif t <= t_fixed:
                 note = "swept bucket solo"
-            print(f"{t:>7.3f}  {fmt(r):>11}  {fmt(c):>12}  {fmt(delta):>10}   {note}")
+            nstr = str(n) if n else "-"
+            print(f"{t:>7.3f}  {fmt(r):>11}  {fmt(c):>12} {nstr:>3}  {fmt(delta):>10}   {note}")
 
         # Does the swept bucket earn its place under restriction?
         interior = {t: v for t, v in data.items() if t_fixed < t < 1.0}
@@ -139,14 +160,25 @@ def main():
             print(f"  fixed bucket solo   : MIND={base_fixed:.6f}")
             if base_swept is not None:
                 print(f"  swept bucket solo   : MIND={base_swept:.6f}")
-            verdict = ("INCONCLUSIVE (within replicate noise)" if noise and gain <= noise
+            # Bar to clear: the spread between repeated runs of one configuration
+            # in the overlapping sweeps, or this batch's own replicate if larger.
+            bar = max(POOLED_SD.get(label, 0.0), noise or 0.0)
+            verdict = ("INCONCLUSIVE (within replicate noise)" if gain <= bar
                        else "the partition beats the single bucket" if gain > 0
                        else "no gain from splitting")
-            print(f"  gain over fixed solo: {gain:+.6f}   -> {verdict}")
+            print(f"  gain over fixed solo: {gain:+.6f}  (bar {bar:.6f})  -> {verdict}")
 
-            cond_best_t = min(COND[label], key=COND[label].get)
+            cond_best_t = min(COND[label], key=lambda t: COND[label][t][0])
+            cb, cn = COND[label][cond_best_t]
             print(f"  overlapping sweep optimum was T={cond_best_t:.3f} "
-                  f"(MIND={COND[label][cond_best_t]:.6f})")
+                  f"(MIND={cb:.6f}, n={cn})")
+            # Only claim the optimum moved if it also beat the baseline by more
+            # than the replicate spread -- an interior argmin that is within noise
+            # of T=1.0 is not evidence of anything, which is the trap the
+            # single-run conditional results fell into.
+            if best_t < 1.0 and cond_best_t >= 1.0 and gain > bar:
+                print(f"  ** optimum moved off T=1.0 under restriction, by more than "
+                      f"the noise bar -- the hypothesis predicts exactly this **")
 
     print("\n" + "=" * 78)
     print("Reminder: the old B2-only@0.55 was recorded as both 0.031144 and 0.032623")
