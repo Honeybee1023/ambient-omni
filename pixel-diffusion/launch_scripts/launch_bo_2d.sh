@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.
+AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+
 # Submit training + gen+eval for a 2D BO round (v2b, MIND).
 # Usage: bash launch_bo_2d.sh <round_number>
 
@@ -8,24 +12,24 @@ if [ -z "$ROUND" ]; then
     exit 1
 fi
 
-MANIFEST="/data/scratch/honjar/generated/bo2d_round${ROUND}_manifest.json"
+MANIFEST="${AMBIENT_BASE}/generated/bo2d_round${ROUND}_manifest.json"
 if [ ! -f "$MANIFEST" ]; then
     echo "ERROR: Manifest not found: $MANIFEST"
     echo "Run bo_suggest_2d.py --round $ROUND first."
     exit 1
 fi
 
-TRAIN_SCRIPT="/data/scratch/honjar/ambient-omni/pixel-diffusion/run_train_2k_seeded.sh"
-EVAL_SCRIPT="/data/scratch/honjar/ambient-omni/pixel-diffusion/run_v2_gen_eval.sh"
-LOG_DIR="/data/scratch/honjar/train_logs"
+TRAIN_SCRIPT="${AMBIENT_BASE}/ambient-omni/pixel-diffusion/run_train_2k_seeded.sh"
+EVAL_SCRIPT="${AMBIENT_BASE}/ambient-omni/pixel-diffusion/run_v2_gen_eval.sh"
+LOG_DIR="${AMBIENT_BASE}/train_logs"
 
 # Disk check
-DISK_USAGE=$(du -sh /data/scratch/honjar/train_outputs/ | awk '{print $1}')
+DISK_USAGE=$(du -sh ${AMBIENT_BASE}/train_outputs/ | awk '{print $1}')
 echo "Disk usage: $DISK_USAGE (threshold: 600G)"
 echo ""
 
 # Parse dataset names from manifest
-DATASETS=$(/data/scratch/honjar/miniconda3/envs/ambient/bin/python -c \
+DATASETS=$(${AMBIENT_BASE}/miniconda3/envs/ambient/bin/python -c \
     "import json; d=json.load(open('$MANIFEST')); print(' '.join(d['datasets']))")
 
 COUNT=$(echo $DATASETS | wc -w)

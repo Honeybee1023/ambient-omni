@@ -1,12 +1,16 @@
 #!/bin/bash
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.
+AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+
 # Launch fine-sweep + T-convergence + baseline re-seed training jobs.
 # 23 fine sweep + 4 T-convergence + 1 baseline re-seed = 28 jobs total.
 
-TRAIN_SCRIPT="/data/scratch/honjar/ambient-omni/pixel-diffusion/run_train_2k_seeded.sh"
-DATASET_DIR="/data/scratch/honjar/annotated_datasets"
+TRAIN_SCRIPT="${AMBIENT_BASE}/ambient-omni/pixel-diffusion/run_train_2k_seeded.sh"
+DATASET_DIR="${AMBIENT_BASE}/annotated_datasets"
 SEED=0
 EXCLUDE="aia-h200-7"
-LOG_DIR="/data/scratch/honjar/train_logs"
+LOG_DIR="${AMBIENT_BASE}/train_logs"
 
 submitted=0
 missing=0
@@ -41,7 +45,7 @@ echo "============================================"
 echo ""
 
 # Check disk first
-DISK_USAGE=$(du -s /data/scratch/honjar/train_outputs/ 2>/dev/null | awk '{print $1}')
+DISK_USAGE=$(du -s ${AMBIENT_BASE}/train_outputs/ 2>/dev/null | awk '{print $1}')
 DISK_GB=$((DISK_USAGE / 1048576))
 echo "Disk usage: ~${DISK_GB}GB"
 if [ "$DISK_GB" -gt 600 ]; then

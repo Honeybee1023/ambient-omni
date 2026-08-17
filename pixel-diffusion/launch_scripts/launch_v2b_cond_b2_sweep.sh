@@ -1,11 +1,15 @@
 #!/bin/bash
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.
+AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+
 # Launch conditional sweep: B1 fixed at T=0.5, sweep B2
 # 9 train+eval pairs with dependency chaining
 
-SCRIPT_DIR="/data/scratch/honjar/ambient-omni/pixel-diffusion"
+SCRIPT_DIR="${AMBIENT_BASE}/ambient-omni/pixel-diffusion"
 TRAIN_SCRIPT="${SCRIPT_DIR}/run_train_2k_seeded.sh"
 EVAL_SCRIPT="${SCRIPT_DIR}/run_v2_gen_eval.sh"
-LOG_DIR="/data/scratch/honjar/train_logs"
+LOG_DIR="${AMBIENT_BASE}/train_logs"
 
 DATASETS=(
     celeba_v2b_cond_b2_T040

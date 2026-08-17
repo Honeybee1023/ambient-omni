@@ -2,13 +2,22 @@
 """Create v2b conditional sweep datasets on lysine: B1 fixed at T=0.5, sweep B2.
 Extends the CSAIL sweep (0.4-0.7) to the tails: 0, 0.2, 0.3, 0.8, 0.9, 0.95, 0.99, 1.0
 """
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import os, sys, json, glob
 import numpy as np
 from scipy.stats import norm
 
-PROCESSED_DIR = "/data/honjar/celeba_processed_v2b/shared_buckets_64"
-DATASET_DIR = "/data/honjar/annotated_datasets"
-TVEC_DIR = "/data/honjar/generated"
+PROCESSED_DIR = f"{AMBIENT_BASE}/celeba_processed_v2b/shared_buckets_64"
+DATASET_DIR = f"{AMBIENT_BASE}/annotated_datasets"
+TVEC_DIR = f"{AMBIENT_BASE}/generated"
 ALL_BLUR_BUCKETS = [1, 2, 3, 4, 5, 6, 7]
 INACTIVE_T = 0.999
 

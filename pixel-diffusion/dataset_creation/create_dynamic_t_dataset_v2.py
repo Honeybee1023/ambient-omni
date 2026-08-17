@@ -18,6 +18,15 @@ Usage:
     python dataset_creation/create_dynamic_t_dataset_v2.py
 """
 
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
+
 import argparse
 import json
 import os
@@ -26,8 +35,8 @@ import shutil
 import numpy as np
 from scipy.stats import norm
 
-SRC = "/data/honjar/celeba_processed_v2b/shared_buckets_64"
-OUT_ROOT = "/data/honjar/annotated_datasets"
+SRC = f"{AMBIENT_BASE}/celeba_processed_v2b/shared_buckets_64"
+OUT_ROOT = f"{AMBIENT_BASE}/annotated_datasets"
 
 TARGET_BUCKET = "b5"      # sigma_blur = 0.5
 CLEAN_BUCKET = "b0"

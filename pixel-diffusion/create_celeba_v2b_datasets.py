@@ -1,4 +1,13 @@
 """Create annotated datasets for v2b (mild blur 0.1-0.7) coarse 2D sweep."""
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import os, json, shutil, sys
 import numpy as np
 from scipy.stats import norm
@@ -6,8 +15,8 @@ from scipy.stats import norm
 P_MEAN = -1.2
 P_STD = 1.2
 
-SHARED_DIR = "/data/honjar/celeba_processed_v2b/shared_buckets_64"
-ANNOTATED_DIR = "/data/honjar/annotated_datasets"
+SHARED_DIR = f"{AMBIENT_BASE}/celeba_processed_v2b/shared_buckets_64"
+ANNOTATED_DIR = f"{AMBIENT_BASE}/annotated_datasets"
 N_BUCKETS = 8
 BLUR_SIGMAS = {0: 0.0, 1: 0.1, 2: 0.2, 3: 0.3, 4: 0.4, 5: 0.5, 6: 0.6, 7: 0.7}
 COARSE_T = [0.0, 0.2, 0.4, 0.6, 0.8, 0.9, 0.95]

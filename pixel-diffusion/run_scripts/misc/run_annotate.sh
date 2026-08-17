@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.
+AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+
 #SBATCH --partition=csail-shared-h200
 #SBATCH --qos=shared-if-available
 #SBATCH --nodes=1
@@ -7,12 +11,12 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
 #SBATCH --job-name=create_datasets
-#SBATCH --output=/data/scratch/honjar/ambient-omni/pixel-diffusion/create_datasets_%j.out
+#SBATCH --output=${AMBIENT_BASE}/ambient-omni/pixel-diffusion/create_datasets_%j.out
 
 echo "Job started on $(hostname)"
 
-export PATH=/data/scratch/honjar/miniconda3/envs/ambient/bin:$PATH
+export PATH=${AMBIENT_BASE}/miniconda3/envs/ambient/bin:$PATH
 
-cd /data/scratch/honjar/ambient-omni/pixel-diffusion
+cd ${AMBIENT_BASE}/ambient-omni/pixel-diffusion
 python create_annotated_datasets.py --num_random_vectors 10
 echo "Exit code: $?"

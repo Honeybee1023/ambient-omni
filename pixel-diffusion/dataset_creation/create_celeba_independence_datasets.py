@@ -10,6 +10,15 @@ Independence prediction: FID(all) ≈ FID_baseline + Δ_low + Δ_high
 where Δ_low = FID(lowblur) - FID_baseline
       Δ_high = FID(highblur) - FID_baseline
 """
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import os, json, shutil
 import numpy as np
 from scipy.stats import norm
@@ -17,9 +26,9 @@ from scipy.stats import norm
 P_MEAN = -1.2
 P_STD = 1.2
 
-CELEBA_ROOT = "/data/scratch/honjar/celeba_processed"
+CELEBA_ROOT = f"{AMBIENT_BASE}/celeba_processed"
 SHARED_DIR = os.path.join(CELEBA_ROOT, "shared_buckets_64")
-ANNOTATED_DIR = "/data/scratch/honjar/annotated_datasets"
+ANNOTATED_DIR = f"{AMBIENT_BASE}/annotated_datasets"
 
 BLUR_SIGMAS = {1: 0.5, 2: 1.0, 3: 2.0, 4: 3.0, 5: 4.0, 6: 5.0, 7: 8.0}
 TMID = {1: 0.416, 2: 0.561, 3: 0.803, 4: 0.878, 5: 0.902, 6: 0.913, 7: 0.928}

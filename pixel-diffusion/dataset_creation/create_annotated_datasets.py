@@ -10,6 +10,15 @@ Outputs one annotated dataset folder per T vector, each containing:
 - annotations.jsonl with per-image sigma_min values
 """
 
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
+
 import os
 import json
 import shutil
@@ -169,9 +178,9 @@ def create_baseline_dataset(wolf_files, dog_files, cat_files,
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_root", type=str, default="/data/scratch/honjar/afhq/afhq")
-    parser.add_argument("--wolf_list", type=str, default="/data/scratch/honjar/afhq_classified/wolf_files.json")
-    parser.add_argument("--output_root", type=str, default="/data/scratch/honjar/annotated_datasets")
+    parser.add_argument("--data_root", type=str, default=f"{AMBIENT_BASE}/afhq/afhq")
+    parser.add_argument("--wolf_list", type=str, default=f"{AMBIENT_BASE}/afhq_classified/wolf_files.json")
+    parser.add_argument("--output_root", type=str, default=f"{AMBIENT_BASE}/annotated_datasets")
     parser.add_argument("--num_random_vectors", type=int, default=10)
     parser.add_argument("--resolution", type=int, default=64)
     parser.add_argument("--master_seed", type=int, default=42)

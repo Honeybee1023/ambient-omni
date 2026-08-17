@@ -1,4 +1,13 @@
 """Compute MIND (Monge Inception Distance) = Sliced Wasserstein on Inception features."""
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import torch
 import numpy as np
 from PIL import Image
@@ -77,8 +86,8 @@ def sliced_wasserstein(feats1, feats2, n_projections=1000, seed=0):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gen_path', required=True)
-    parser.add_argument('--ref_path', default='/data/scratch/honjar/celeba_processed/holdout_64')
-    parser.add_argument('--ref_cache', default='/data/scratch/honjar/celeba_processed/inception_holdout_feats.npz')
+    parser.add_argument('--ref_path', default=f'{AMBIENT_BASE}/celeba_processed/holdout_64')
+    parser.add_argument('--ref_cache', default=f'{AMBIENT_BASE}/celeba_processed/inception_holdout_feats.npz')
     parser.add_argument('--out_path', required=True)
     parser.add_argument('--n_projections', type=int, default=1000)
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')

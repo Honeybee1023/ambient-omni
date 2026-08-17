@@ -11,12 +11,21 @@ Interpretation guard: our measured seed-to-seed noise floor is ~0.001 MIND, so
 differences below ~0.002 are NOT results at a single seed.
 """
 
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
+
 import glob
 import json
 import os
 import re
 
-GENDIR = "/data/honjar/generated"
+GENDIR = f"{AMBIENT_BASE}/generated"
 NOISE_FLOOR = 0.001
 
 # Known reference points measured on this machine (static b5 sweep, seed 0).

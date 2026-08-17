@@ -3,6 +3,15 @@ Functional form analysis: exponential vs power law for PickScore curves.
 Also compares 2-domain vs 7-category curves (independence test).
 Reads all data from JSON files on disk. Outputs results to JSON.
 """
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import json, glob, re, os
 import numpy as np
 
@@ -11,7 +20,7 @@ V_WOLVES = 3.35
 
 def collect_data(prefix):
     """Read all metrics files for a given experiment prefix."""
-    pattern = f'/data/scratch/honjar/generated/metrics_{prefix}_*_1000kimg.json'
+    pattern = f'{AMBIENT_BASE}/generated/metrics_{prefix}_*_1000kimg.json'
     files = sorted(glob.glob(pattern))
     by_cat = {}
     for f in files:
@@ -155,7 +164,7 @@ for prefix, d in [('pilot2d', data_2d), ('exp7d', data_7c)]:
             'V': [p[2] for p in points],
         }
 
-outpath = '/data/scratch/honjar/generated/functional_form_analysis.json'
+outpath = f'{AMBIENT_BASE}/generated/functional_form_analysis.json'
 with open(outpath, 'w') as f:
     json.dump(results, f, indent=2)
 print(f"\nFull results saved to: {outpath}")

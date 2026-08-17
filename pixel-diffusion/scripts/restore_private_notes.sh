@@ -17,7 +17,11 @@
 
 set -u
 
-CANON=${CANON:-/data/honjar/ambient-omni-private-notes}
+# Per-machine paths: see env.sh / SYNC.md at the repo root.
+AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+
+
+CANON=${CANON:-${AMBIENT_BASE}/ambient-omni-private-notes}
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)   # pixel-diffusion/
 
 if [ ! -d "$CANON" ]; then

@@ -1,10 +1,19 @@
 """
 Collect all v2b MIND + val loss results into a single JSON.
-Output: /data/scratch/honjar/generated/v2b_all_results.json
+Output: $AMBIENT_BASE/generated/v2b_all_results.json
 """
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import json, os, glob, re
 
-GEN_DIR = "/data/scratch/honjar/generated"
+GEN_DIR = f"{AMBIENT_BASE}/generated"
 OUTPUT = os.path.join(GEN_DIR, "v2b_all_results.json")
 
 # T suffix -> T value mapping

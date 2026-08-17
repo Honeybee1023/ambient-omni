@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
 """Collect conditional B2 sweep results (B1 fixed at T=0.5)."""
 
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
+
 import os
 import json
 import glob
 import re
 
-GENERATED_DIR = "/data/scratch/honjar/generated"
+GENERATED_DIR = f"{AMBIENT_BASE}/generated"
 
 def decode_t_suffix(suffix):
     """T040 -> 0.4, T0525 -> 0.525"""

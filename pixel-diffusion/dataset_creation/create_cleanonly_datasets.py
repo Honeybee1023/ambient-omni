@@ -1,11 +1,20 @@
 """Create clean-only CelebA datasets with reduced sample counts."""
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import os
 import json
 import random
 import sys
 
-SHARED_DIR = "/data/scratch/honjar/celeba_processed/shared_buckets_64"
-OUT_BASE = "/data/scratch/honjar/annotated_datasets"
+SHARED_DIR = f"{AMBIENT_BASE}/celeba_processed/shared_buckets_64"
+OUT_BASE = f"{AMBIENT_BASE}/annotated_datasets"
 SEED = 2026
 
 def create_cleanonly(n_images, name):

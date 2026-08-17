@@ -1,6 +1,10 @@
 #!/bin/bash
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.
+AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+
 # Submit gen+eval for ALL 2-domain pilot models (old + new T values).
-SCRIPT=/data/scratch/honjar/ambient-omni/pixel-diffusion/run_percat_gen_eval.sh
+SCRIPT=${AMBIENT_BASE}/ambient-omni/pixel-diffusion/run_percat_gen_eval.sh
 
 READY=0
 SKIP=0
@@ -13,15 +17,15 @@ for cat in dog cat tiger lion fox leopard cheetah; do
         TOTAL=$((TOTAL+1))
 
         # Check if dataset exists
-        if [ ! -d "/data/scratch/honjar/annotated_datasets/${NAME}" ]; then
+        if [ ! -d "${AMBIENT_BASE}/annotated_datasets/${NAME}" ]; then
             continue
         fi
 
         # Check for checkpoint
-        CKPT=$(ls /data/scratch/honjar/train_outputs/*-${NAME}-*/network-snapshot-001000.pkl 2>/dev/null | head -1)
+        CKPT=$(ls ${AMBIENT_BASE}/train_outputs/*-${NAME}-*/network-snapshot-001000.pkl 2>/dev/null | head -1)
         if [ -n "$CKPT" ]; then
             # Check if metrics already computed
-            OUTJSON="/data/scratch/honjar/generated/metrics_${NAME}_1000kimg.json"
+            OUTJSON="${AMBIENT_BASE}/generated/metrics_${NAME}_1000kimg.json"
             if [ -f "$OUTJSON" ]; then
                 echo "  DONE: $NAME (metrics exist)"
             else

@@ -7,6 +7,15 @@ Usage:
   python bo_suggest.py --round 1 --batch-size 15 --beta 1.0
   python bo_suggest.py --round 1 --dry-run
 """
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import os, sys, json, glob, re, argparse, shutil
 import numpy as np
 from scipy.stats import norm as scipy_norm
@@ -14,10 +23,10 @@ from scipy.stats import norm as scipy_norm
 # === Constants ===
 P_MEAN = -1.2
 P_STD = 1.2
-CELEBA_ROOT = "/data/scratch/honjar/celeba_processed"
+CELEBA_ROOT = f"{AMBIENT_BASE}/celeba_processed"
 SHARED_DIR = os.path.join(CELEBA_ROOT, "shared_buckets_64")
-ANNOTATED_DIR = "/data/scratch/honjar/annotated_datasets"
-METRICS_DIR = "/data/scratch/honjar/generated"
+ANNOTATED_DIR = f"{AMBIENT_BASE}/annotated_datasets"
+METRICS_DIR = f"{AMBIENT_BASE}/generated"
 BUCKETS = [1, 2, 3, 4, 5, 6, 7]
 BLUR_SIGMAS = {1: 0.5, 2: 1.0, 3: 2.0, 4: 3.0, 5: 4.0, 6: 5.0, 7: 8.0}
 

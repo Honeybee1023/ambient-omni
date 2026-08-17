@@ -1,3 +1,12 @@
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import os, json, shutil, sys
 import numpy as np
 from scipy.stats import norm
@@ -5,9 +14,9 @@ from scipy.stats import norm
 P_MEAN = -1.2
 P_STD = 1.2
 
-CELEBA_V2_ROOT = "/data/honjar/celeba_processed_v2b"
+CELEBA_V2_ROOT = f"{AMBIENT_BASE}/celeba_processed_v2b"
 SHARED_DIR = os.path.join(CELEBA_V2_ROOT, "shared_buckets_64")
-ANNOTATED_DIR = "/data/honjar/annotated_datasets"
+ANNOTATED_DIR = f"{AMBIENT_BASE}/annotated_datasets"
 N_BUCKETS = 8
 T_OFF_SIGMA_MIN = float(np.exp(P_STD * norm.ppf(0.999) + P_MEAN))
 

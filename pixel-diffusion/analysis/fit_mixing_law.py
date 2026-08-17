@@ -9,13 +9,22 @@ Fits separate laws for PickScore and Vendi, then optimizes constrained objective
 9 parameters per metric (c, k, t_1...t_7) from 20 data points = 11 DOF.
 """
 
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
+
 import json
 import os
 import numpy as np
 from scipy.optimize import minimize, differential_evolution
 
-GENERATED_DIR = '/data/scratch/honjar/generated'
-ANNOTATED_DIR = '/data/scratch/honjar/annotated_datasets'
+GENERATED_DIR = f'{AMBIENT_BASE}/generated'
+ANNOTATED_DIR = f'{AMBIENT_BASE}/annotated_datasets'
 
 # --- Load data ---
 assignments = np.load(os.path.join(ANNOTATED_DIR, 'percat_r1_assignments.npz'), allow_pickle=True)

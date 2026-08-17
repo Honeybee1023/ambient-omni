@@ -1,3 +1,12 @@
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import matplotlib
 matplotlib.use('Agg')  # non-interactive backend for cluster
 import matplotlib.pyplot as plt
@@ -6,18 +15,18 @@ import os
 
 # Seed A: seeds 0-999
 checkpoints_A = [
-    (1001, "/data/scratch/honjar/generated/baseline_wolves_only_1000kimg/fid_out.json"),
-    (2001, "/data/scratch/honjar/generated/baseline_wolves_only_2000kimg/fid_out.json"),
-    (3002, "/data/scratch/honjar/generated/baseline_wolves_only_3000kimg/fid_out.json"),
-    (4003, "/data/scratch/honjar/generated/baseline_wolves_only_4000kimg/fid_out.json"),
+    (1001, f"{AMBIENT_BASE}/generated/baseline_wolves_only_1000kimg/fid_out.json"),
+    (2001, f"{AMBIENT_BASE}/generated/baseline_wolves_only_2000kimg/fid_out.json"),
+    (3002, f"{AMBIENT_BASE}/generated/baseline_wolves_only_3000kimg/fid_out.json"),
+    (4003, f"{AMBIENT_BASE}/generated/baseline_wolves_only_4000kimg/fid_out.json"),
 ]
 
 # Seed B: seeds 1000-1999
 checkpoints_B = [
-    (1001, "/data/scratch/honjar/generated/baseline_wolves_only_1000kimg_seedB/fid_out.json"),
-    (2001, "/data/scratch/honjar/generated/baseline_wolves_only_2000kimg_seedB/fid_out.json"),
-    (3002, "/data/scratch/honjar/generated/baseline_wolves_only_3000kimg_seedB/fid_out.json"),
-    (4003, "/data/scratch/honjar/generated/baseline_wolves_only_4000kimg_seedB/fid_out.json"),
+    (1001, f"{AMBIENT_BASE}/generated/baseline_wolves_only_1000kimg_seedB/fid_out.json"),
+    (2001, f"{AMBIENT_BASE}/generated/baseline_wolves_only_2000kimg_seedB/fid_out.json"),
+    (3002, f"{AMBIENT_BASE}/generated/baseline_wolves_only_3000kimg_seedB/fid_out.json"),
+    (4003, f"{AMBIENT_BASE}/generated/baseline_wolves_only_4000kimg_seedB/fid_out.json"),
 ]
 
 def load_fids(checkpoints, label):
@@ -56,6 +65,6 @@ for k, f in zip(kimgs_B, fids_B):
                  xytext=(0, -18), ha='center', fontsize=9, color='#FF9800')
 
 plt.tight_layout()
-out_path = "/data/scratch/honjar/generated/fid_curve_baseline_wolves_both_seeds.png"
+out_path = f"{AMBIENT_BASE}/generated/fid_curve_baseline_wolves_both_seeds.png"
 plt.savefig(out_path, dpi=150)
 print(f"\nPlot saved to: {out_path}")

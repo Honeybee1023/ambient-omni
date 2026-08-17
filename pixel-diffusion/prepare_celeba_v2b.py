@@ -1,13 +1,22 @@
 """Prepare CelebA v2b: 500 clean + 7 mild blur buckets (sigma 0.1-0.7)."""
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import os, json, time
 import numpy as np
 from PIL import Image
 from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
 
-RAW_DIR = "/data/honjar/celeba_raw/img_align_celeba"
-OUTPUT_ROOT = "/data/honjar/celeba_processed_v2b"
-HOLDOUT_SRC = "/data/honjar/celeba_processed/holdout_64"
+RAW_DIR = f"{AMBIENT_BASE}/celeba_raw/img_align_celeba"
+OUTPUT_ROOT = f"{AMBIENT_BASE}/celeba_processed_v2b"
+HOLDOUT_SRC = f"{AMBIENT_BASE}/celeba_processed/holdout_64"
 HOLDOUT_DIR = os.path.join(OUTPUT_ROOT, "holdout_64")
 SHARED_DIR = os.path.join(OUTPUT_ROOT, "shared_buckets_64")
 

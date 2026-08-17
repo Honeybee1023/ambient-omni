@@ -1,4 +1,13 @@
 """Compute DINO-FD (Frechet Distance in DINOv2 feature space)."""
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import torch
 import numpy as np
 from PIL import Image
@@ -6,7 +15,7 @@ from torchvision import transforms
 import os, glob, json, argparse
 from scipy import linalg
 
-DINOV2_LOCAL = "/data/scratch/honjar/.cache/torch/hub/facebookresearch_dinov2_main"
+DINOV2_LOCAL = f"{AMBIENT_BASE}/.cache/torch/hub/facebookresearch_dinov2_main"
 
 def get_model(device):
     model = torch.hub.load(DINOV2_LOCAL, 'dinov2_vitb14', source='local')
@@ -48,8 +57,8 @@ def compute_fd(feats1, feats2):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gen_path', required=True)
-    parser.add_argument('--ref_path', default='/data/scratch/honjar/celeba_processed/holdout_64')
-    parser.add_argument('--ref_cache', default='/data/scratch/honjar/celeba_processed/dino_holdout_feats.npz')
+    parser.add_argument('--ref_path', default=f'{AMBIENT_BASE}/celeba_processed/holdout_64')
+    parser.add_argument('--ref_cache', default=f'{AMBIENT_BASE}/celeba_processed/dino_holdout_feats.npz')
     parser.add_argument('--out_path', required=True)
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     args = parser.parse_args()

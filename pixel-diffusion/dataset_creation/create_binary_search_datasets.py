@@ -8,6 +8,15 @@ assignments. All datasets share images via symlinks to baseline_naive_all.
 Saves assignment matrix for attribution analysis.
 """
 
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
+
 import os
 import json
 import numpy as np
@@ -26,10 +35,10 @@ def t_to_sigma_min(t_value):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--source_dir", type=str,
-                        default="/data/scratch/honjar/annotated_datasets/baseline_naive_all",
+                        default=f"{AMBIENT_BASE}/annotated_datasets/baseline_naive_all",
                         help="Directory with pre-resized 64x64 images to symlink from")
     parser.add_argument("--output_root", type=str,
-                        default="/data/scratch/honjar/annotated_datasets",
+                        default=f"{AMBIENT_BASE}/annotated_datasets",
                         help="Root directory for output datasets")
     parser.add_argument("--round", type=int, default=1,
                         help="Binary search round number")

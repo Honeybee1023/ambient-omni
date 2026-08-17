@@ -1,11 +1,15 @@
 #!/bin/bash
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.
+AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+
 # Launch all CelebA training jobs in priority order:
 # 1. Stability test (1 job, longer duration)
 # 2. Coarse sweep (35 jobs)
 # 3. Fine sweep (63 jobs)
 
-SCRIPT_DIR=/data/scratch/honjar/ambient-omni/pixel-diffusion
-ANNOTATED=/data/scratch/honjar/annotated_datasets
+SCRIPT_DIR=${AMBIENT_BASE}/ambient-omni/pixel-diffusion
+ANNOTATED=${AMBIENT_BASE}/annotated_datasets
 
 echo "=== CelebA Training Launcher ==="
 
@@ -32,7 +36,7 @@ for b in 1 2 3 4 5 6 7; do
             echo "  SKIP (stability): $NAME"
             continue
         fi
-        CKPT=$(ls /data/scratch/honjar/train_outputs/*-${NAME}-*/network-snapshot-001000.pkl 2>/dev/null | head -1)
+        CKPT=$(ls ${AMBIENT_BASE}/train_outputs/*-${NAME}-*/network-snapshot-001000.pkl 2>/dev/null | head -1)
         if [ -n "$CKPT" ]; then
             echo "  SKIP (done): $NAME"
             continue
@@ -54,7 +58,7 @@ FINE_COUNT=0
 for b in 1 2 3 4 5 6 7; do
     for suffix in 0125 0375 0625 080 085 090 095 097 099; do
         NAME="celeba_2d_b${b}_T${suffix}"
-        CKPT=$(ls /data/scratch/honjar/train_outputs/*-${NAME}-*/network-snapshot-001000.pkl 2>/dev/null | head -1)
+        CKPT=$(ls ${AMBIENT_BASE}/train_outputs/*-${NAME}-*/network-snapshot-001000.pkl 2>/dev/null | head -1)
         if [ -n "$CKPT" ]; then
             echo "  SKIP (done): $NAME"
             continue

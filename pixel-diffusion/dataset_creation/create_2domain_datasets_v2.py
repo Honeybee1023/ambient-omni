@@ -5,14 +5,23 @@ Same structure as v1: wolves + one supplementary category.
 Total: 7 categories x 9 T values = 63 new datasets.
 """
 
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
+
 import json, os, shutil
 import numpy as np
 from scipy.stats import norm
 
 P_MEAN, P_STD = -1.2, 1.2
-CLASSIFIED_DIR = '/data/scratch/honjar/afhq_classified'
-DATA_ROOT = '/data/scratch/honjar/afhq/afhq'
-ANNOTATED_DIR = '/data/scratch/honjar/annotated_datasets'
+CLASSIFIED_DIR = f'{AMBIENT_BASE}/afhq_classified'
+DATA_ROOT = f'{AMBIENT_BASE}/afhq/afhq'
+ANNOTATED_DIR = f'{AMBIENT_BASE}/annotated_datasets'
 SHARED_DIR = os.path.join(ANNOTATED_DIR, 'shared_all_categories_64')
 
 WILD_CATEGORIES = ['wolf', 'tiger', 'lion', 'fox', 'leopard', 'cheetah']

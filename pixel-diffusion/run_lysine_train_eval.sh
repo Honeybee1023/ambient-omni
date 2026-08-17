@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.
+AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+
 # Run train (2k kimg) + eval (gen 5K + MIND + val loss) on lysine for one dataset.
 # Usage: bash run_lysine_train_eval.sh <dataset_name> <gpu_id> [seed]
 
@@ -12,17 +16,17 @@ if [ -z "$DATASET_NAME" ] || [ -z "$GPU_ID" ]; then
 fi
 
 export CUDA_VISIBLE_DEVICES=$GPU_ID
-export PATH=/data/honjar/miniconda3/envs/ambient/bin:$PATH
-export PYTHONPATH=/data/honjar/ambient-omni/pixel-diffusion
-export HF_HOME=/data/honjar/.cache/huggingface
-export TORCH_HOME=/data/honjar/.cache/torch
+export PATH=${AMBIENT_BASE}/miniconda3/envs/ambient/bin:$PATH
+export PYTHONPATH=${AMBIENT_BASE}/ambient-omni/pixel-diffusion
+export HF_HOME=${AMBIENT_BASE}/.cache/huggingface
+export TORCH_HOME=${AMBIENT_BASE}/.cache/torch
 export MASTER_ADDR=localhost
 export MASTER_PORT=$((RANDOM % 1000 + 10000))
 export WANDB_API_KEY=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
 
-PYTHON=/data/honjar/miniconda3/envs/ambient/bin/python
-BASE=/data/honjar
-cd /data/honjar/ambient-omni/pixel-diffusion
+PYTHON=${AMBIENT_BASE}/miniconda3/envs/ambient/bin/python
+BASE=${AMBIENT_BASE}
+cd ${AMBIENT_BASE}/ambient-omni/pixel-diffusion
 
 # --- Auto-resume ---
 LATEST_STATE=$(ls ${BASE}/train_outputs/*-${DATASET_NAME}-*/training-state-*.pt 2>/dev/null | while read f; do echo "$(basename $f) $f"; done | sort | tail -1 | awk '{print $2}')

@@ -9,12 +9,21 @@ Permutation test: null distribution of r(delta, predicted_improvement) under shu
 Reads: bo_independence_analysis.json
 Saves: dampening_analysis.json
 """
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import json
 import numpy as np
 from scipy import stats
 import os
 
-METRICS_DIR = "/data/scratch/honjar/generated"
+METRICS_DIR = f"{AMBIENT_BASE}/generated"
 INPUT = os.path.join(METRICS_DIR, "bo_independence_analysis.json")
 OUTPUT = os.path.join(METRICS_DIR, "dampening_analysis.json")
 

@@ -1,10 +1,14 @@
 #!/bin/bash
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.
+AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+
 # Launch 5 cond_b3 train+eval pairs on CSAIL SLURM
 # Fine points near B3 minimum: T=0.4, 0.45, 0.5, 0.55, 0.6
 
-TRAIN_SCRIPT="/data/scratch/honjar/ambient-omni/pixel-diffusion/run_train_2k_seeded.sh"
-EVAL_SCRIPT="/data/scratch/honjar/ambient-omni/pixel-diffusion/run_v2_gen_eval.sh"
-LOG_DIR="/data/scratch/honjar/train_logs"
+TRAIN_SCRIPT="${AMBIENT_BASE}/ambient-omni/pixel-diffusion/run_train_2k_seeded.sh"
+EVAL_SCRIPT="${AMBIENT_BASE}/ambient-omni/pixel-diffusion/run_v2_gen_eval.sh"
+LOG_DIR="${AMBIENT_BASE}/train_logs"
 EXCLUDE="aia-h200-7"
 
 DATASETS=(

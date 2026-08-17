@@ -5,6 +5,15 @@ Outputs per-category file lists for the per-category threshold experiment.
 Based on classify_wolves.py — same CLIP model, same batch processing.
 """
 
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
+
 import os
 import json
 import torch
@@ -13,8 +22,8 @@ from transformers import CLIPProcessor, CLIPModel
 from tqdm import tqdm
 
 # Config
-WILD_DIR = "/data/scratch/honjar/afhq/afhq/train/wild"
-OUTPUT_DIR = "/data/scratch/honjar/afhq_classified"
+WILD_DIR = f"{AMBIENT_BASE}/afhq/afhq/train/wild"
+OUTPUT_DIR = f"{AMBIENT_BASE}/afhq_classified"
 BATCH_SIZE = 32
 
 # Categories — these are the ones we want to separate into

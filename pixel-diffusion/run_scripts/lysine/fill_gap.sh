@@ -20,10 +20,14 @@
 
 set -u
 
+# Per-machine paths: see env.sh / SYNC.md at the repo root.
+AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+
+
 GPU=${GPU:-1}
 SEED=${SEED:-3}
 ARMS=${ARMS:-"warmup_0to095 linear_0to095"}
-QUEUE=${QUEUE:-/data/honjar/ambient-omni/pixel-diffusion/run_scripts/lysine/run_dynamic_t_v2_queue.sh}
+QUEUE=${QUEUE:-${AMBIENT_BASE}/ambient-omni/pixel-diffusion/run_scripts/lysine/run_dynamic_t_v2_queue.sh}
 
 echo "[fill] GPU $GPU waiting for chain$GPU to finish ($(date '+%F %T'))"
 

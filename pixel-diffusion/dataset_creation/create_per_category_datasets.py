@@ -15,6 +15,15 @@ Step 2: For each model, sample T per category, create symlinks + annotations.jso
 Step 3: Save assignment matrix as .npz for regression
 """
 
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
+
 import os
 import json
 import shutil
@@ -28,9 +37,9 @@ P_MEAN = -1.2
 P_STD = 1.2
 
 # Paths
-DATA_ROOT = "/data/scratch/honjar/afhq/afhq"
-CLASSIFIED_DIR = "/data/scratch/honjar/afhq_classified"
-OUTPUT_ROOT = "/data/scratch/honjar/annotated_datasets"
+DATA_ROOT = f"{AMBIENT_BASE}/afhq/afhq"
+CLASSIFIED_DIR = f"{AMBIENT_BASE}/afhq_classified"
+OUTPUT_ROOT = f"{AMBIENT_BASE}/annotated_datasets"
 SHARED_DIR = os.path.join(OUTPUT_ROOT, "shared_all_categories_64")
 
 # Wild sub-categories to KEEP (from classifier)

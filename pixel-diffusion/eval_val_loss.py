@@ -1,18 +1,27 @@
 """Compute denoising validation loss on holdout images."""
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import torch
 import numpy as np
 from PIL import Image
 import pickle
 import os, glob, json, argparse, sys
 
-sys.path.insert(0, '/data/scratch/honjar/ambient-omni/pixel-diffusion')
+sys.path.insert(0, f'{AMBIENT_BASE}/ambient-omni/pixel-diffusion')
 import dnnlib
 from torch_utils import persistence
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--checkpoint', required=True)
-    parser.add_argument('--holdout_dir', default='/data/scratch/honjar/celeba_processed/holdout_64')
+    parser.add_argument('--holdout_dir', default=f'{AMBIENT_BASE}/celeba_processed/holdout_64')
     parser.add_argument('--out_path', required=True)
     parser.add_argument('--max_images', type=int, default=None)
     parser.add_argument('--seed', type=int, default=0)

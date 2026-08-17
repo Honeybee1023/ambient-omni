@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.
+AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+
 #SBATCH --partition=csail-shared-h200
 #SBATCH --qos=shared-if-available
 #SBATCH --nodes=1
@@ -7,7 +11,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --job-name=eval_fid
-#SBATCH --output=/data/scratch/honjar/train_logs/eval_%j.out
+#SBATCH --output=${AMBIENT_BASE}/train_logs/eval_%j.out
 
 DATASET_NAME=$1
 
@@ -16,18 +20,18 @@ if [ -z "$DATASET_NAME" ]; then
     exit 1
 fi
 
-export PATH=/data/scratch/honjar/miniconda3/envs/ambient/bin:$PATH
-export PYTHONPATH=/data/scratch/honjar/ambient-omni/pixel-diffusion
-cd /data/scratch/honjar/ambient-omni/pixel-diffusion
+export PATH=${AMBIENT_BASE}/miniconda3/envs/ambient/bin:$PATH
+export PYTHONPATH=${AMBIENT_BASE}/ambient-omni/pixel-diffusion
+cd ${AMBIENT_BASE}/ambient-omni/pixel-diffusion
 
-REF_STATS="/data/scratch/honjar/annotated_datasets/wolves_ref_stats.npz"
-GEN_BASE="/data/scratch/honjar/generated"
+REF_STATS="${AMBIENT_BASE}/annotated_datasets/wolves_ref_stats.npz"
+GEN_BASE="${AMBIENT_BASE}/generated"
 mkdir -p "$GEN_BASE"
 
 # Collect ALL network-snapshot files across all matching run directories
 # Sort by filename (= sort by kimg since zero-padded)
 # Skip 000000 (random init)
-ALL_CHECKPOINTS=$(ls /data/scratch/honjar/train_outputs/*-${DATASET_NAME}-*/network-snapshot-*.pkl 2>/dev/null | grep -v "network-snapshot-000000.pkl" | while read f; do echo "$(basename $f) $f"; done | sort | awk '{print $2}')
+ALL_CHECKPOINTS=$(ls ${AMBIENT_BASE}/train_outputs/*-${DATASET_NAME}-*/network-snapshot-*.pkl 2>/dev/null | grep -v "network-snapshot-000000.pkl" | while read f; do echo "$(basename $f) $f"; done | sort | awk '{print $2}')
 
 if [ -z "$ALL_CHECKPOINTS" ]; then
     echo "No checkpoints found for $DATASET_NAME"

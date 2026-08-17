@@ -5,6 +5,15 @@ Two competing effects: corruption damage (decreasing) + data scarcity (increasin
 Natural minimum = optimal T. Reads CelebA 2-domain FID metrics, fits curves,
 extracts parameters, collects independence results. Outputs JSON for Jupyter.
 """
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import json, glob, re, os, sys
 import numpy as np
 from scipy.optimize import curve_fit
@@ -20,7 +29,7 @@ def read_fid(filepath):
     else: raise KeyError(f"No fid key. Keys: {list(d.keys())}")
 
 def collect_celeba_fid(kimg=1000):
-    pattern = f'/data/scratch/honjar/generated/metrics_celeba_2d_b*_T*_{kimg}kimg.json'
+    pattern = f'{AMBIENT_BASE}/generated/metrics_celeba_2d_b*_T*_{kimg}kimg.json'
     files = sorted(glob.glob(pattern))
     by_bucket = {}
     for f in files:
@@ -186,7 +195,7 @@ def collect_independence():
     ]
     results = {}
     for name in tests:
-        f = f'/data/scratch/honjar/generated/metrics_{name}_1000kimg.json'
+        f = f'{AMBIENT_BASE}/generated/metrics_{name}_1000kimg.json'
         if os.path.exists(f):
             try: results[name] = round(read_fid(f), 2)
             except: pass
@@ -312,7 +321,7 @@ if __name__ == '__main__':
               f"{mc['raw_argmin_T'][i]:>7.4f} {mc['raw_argmin_FID'][i]:>7.1f} "
               f"{mc['fit_threshold_T'][i]:>5.3f} {mc['A'][i]:>5.1f} {mc['B'][i]:>4.1f}")
 
-    outpath = f'/data/scratch/honjar/generated/celeba_curve_analysis_{kimg}kimg.json'
+    outpath = f'{AMBIENT_BASE}/generated/celeba_curve_analysis_{kimg}kimg.json'
     with open(outpath, 'w') as f:
         json.dump(results, f, indent=2)
     print(f"\nSaved to: {outpath}")

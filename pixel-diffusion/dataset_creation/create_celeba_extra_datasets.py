@@ -3,11 +3,20 @@ Create additional CelebA datasets:
 - 64 new 2-domain datasets (finer T resolution at peaks/valleys)
 - 3 independence test datasets (2k kimg argmin T values)
 """
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import json, os
 import numpy as np
 from scipy.stats import norm
 
-BASE = '/data/scratch/honjar'
+BASE = f'{AMBIENT_BASE}'
 ANNO_DIR = f'{BASE}/annotated_datasets'
 SHARED_DIR = f'{BASE}/celeba_processed/shared_buckets_64'
 

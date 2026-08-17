@@ -1,6 +1,10 @@
 #!/bin/bash
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.
+AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+
 # Submit 2-domain pilot training jobs — dogs and cats FIRST
-SCRIPT=/data/scratch/honjar/ambient-omni/pixel-diffusion/run_train_percat.sh
+SCRIPT=${AMBIENT_BASE}/ambient-omni/pixel-diffusion/run_train_percat.sh
 
 echo "=== Submitting dogs (priority 1) ==="
 for t in 000 025 050 075 100; do

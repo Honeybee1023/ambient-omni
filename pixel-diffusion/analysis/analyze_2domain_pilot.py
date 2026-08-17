@@ -4,10 +4,19 @@ For each category: plot PickScore and Vendi vs T.
 Check if log(metric - c) vs T is linear (would justify exponential form).
 """
 
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
+
 import json, os
 import numpy as np
 
-GENERATED_DIR = '/data/scratch/honjar/generated'
+GENERATED_DIR = f'{AMBIENT_BASE}/generated'
 SUPPLEMENTARY = ['dog', 'cat', 'tiger', 'lion', 'fox', 'leopard', 'cheetah']
 T_VALUES = [0.0, 0.25, 0.5, 0.75, 1.0]
 

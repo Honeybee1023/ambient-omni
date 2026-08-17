@@ -1,15 +1,19 @@
 #!/bin/bash
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.
+AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+
 GPU_ID=$1; shift; DATASETS=("$@")
 export CUDA_VISIBLE_DEVICES=$GPU_ID
-export PATH=/data/honjar/miniconda3/envs/ambient/bin:$PATH
-export PYTHONPATH=/data/honjar/ambient-omni/pixel-diffusion
-export TORCH_HOME=/data/honjar/.cache/torch
-export HF_HOME=/data/honjar/.cache/huggingface
+export PATH=${AMBIENT_BASE}/miniconda3/envs/ambient/bin:$PATH
+export PYTHONPATH=${AMBIENT_BASE}/ambient-omni/pixel-diffusion
+export TORCH_HOME=${AMBIENT_BASE}/.cache/torch
+export HF_HOME=${AMBIENT_BASE}/.cache/huggingface
 export WANDB_MODE=disabled
 export MASTER_ADDR=localhost
-cd /data/honjar/ambient-omni/pixel-diffusion
-HOLDOUT=/data/honjar/celeba_processed_v2b/holdout_64
-MIND_CACHE=/data/honjar/generated/inception_holdout_feats.npz
+cd ${AMBIENT_BASE}/ambient-omni/pixel-diffusion
+HOLDOUT=${AMBIENT_BASE}/celeba_processed_v2b/holdout_64
+MIND_CACHE=${AMBIENT_BASE}/generated/inception_holdout_feats.npz
 
 for NAME in "${DATASETS[@]}"; do
   echo ""; echo "==============================="
@@ -18,18 +22,18 @@ for NAME in "${DATASETS[@]}"; do
   export MASTER_PORT=$((RANDOM % 5000 + 10000))
   # --- TRAIN ---
   python -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
-    --outdir=/data/honjar/train_outputs \
-    --data=/data/honjar/annotated_datasets/${NAME} \
+    --outdir=${AMBIENT_BASE}/train_outputs \
+    --data=${AMBIENT_BASE}/annotated_datasets/${NAME} \
     --cond=0 --arch=ddpmpp --batch=64 --tick=50 --snap=5 --dump=5 \
     --corruption_probability=0.0 --noise_config=identity --s_max=4 \
     --cache=False --duration=2 --seed=0
   if [ $? -ne 0 ]; then echo "TRAIN FAILED: $NAME"; continue; fi
   # --- EVAL ---
-  CKPT=$(ls /data/honjar/train_outputs/*-${NAME}-*/network-snapshot-002*.pkl 2>/dev/null | sort | tail -1)
+  CKPT=$(ls ${AMBIENT_BASE}/train_outputs/*-${NAME}-*/network-snapshot-002*.pkl 2>/dev/null | sort | tail -1)
   if [ -z "$CKPT" ]; then echo "NO CHECKPOINT: $NAME"; continue; fi
-  OUTDIR=/data/honjar/generated/${NAME}_5k_gen
-  MIND_JSON=/data/honjar/generated/mind_${NAME}_2000kimg.json
-  VALLOSS_JSON=/data/honjar/generated/val_loss_${NAME}_2000kimg.json
+  OUTDIR=${AMBIENT_BASE}/generated/${NAME}_5k_gen
+  MIND_JSON=${AMBIENT_BASE}/generated/mind_${NAME}_2000kimg.json
+  VALLOSS_JSON=${AMBIENT_BASE}/generated/val_loss_${NAME}_2000kimg.json
   # Generate 5K
   if [ ! -d "$OUTDIR" ] || [ $(ls "$OUTDIR"/*.png 2>/dev/null | wc -l) -lt 5000 ]; then
     export MASTER_PORT=$((RANDOM % 5000 + 10000))

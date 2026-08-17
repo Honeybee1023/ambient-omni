@@ -3,6 +3,15 @@ CelebA 2-domain analysis at 2k kimg.
 Reads FID from all metrics JSONs, fits sigmoids, saves results.
 Plotting happens in Jupyter.
 """
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import json, os
 import numpy as np
 from scipy.optimize import curve_fit
@@ -19,7 +28,7 @@ def load_all_fid(kimg_label):
         points = []
         for ts in T_SUFFIXES:
             T = suffix_to_T(ts)
-            path = f'/data/scratch/honjar/generated/metrics_celeba_2d_b{b}_T{ts}_{kimg_label}.json'
+            path = f'{AMBIENT_BASE}/generated/metrics_celeba_2d_b{b}_T{ts}_{kimg_label}.json'
             if os.path.exists(path):
                 with open(path) as f:
                     d = json.load(f)
@@ -86,7 +95,7 @@ out = {
     'data_2k': {str(b): {'T': [p[0] for p in data_2k[b]], 'FID': [p[1] for p in data_2k[b]]} for b in range(1, 8)},
     'data_1k': {str(b): {'T': [p[0] for p in data_1k[b]], 'FID': [p[1] for p in data_1k[b]]} for b in range(1, 8)},
 }
-outpath = '/data/scratch/honjar/generated/celeba_2k_analysis.json'
+outpath = f'{AMBIENT_BASE}/generated/celeba_2k_analysis.json'
 with open(outpath, 'w') as f:
     json.dump(out, f, indent=2)
 print(f'\nSaved: {outpath}')

@@ -19,12 +19,16 @@
 
 set -u
 
+# Per-machine paths: see env.sh / SYNC.md at the repo root.
+AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+
+
 GPU=${GPU:-0}
 TOPN=${TOPN:-4}
-QUEUE=${QUEUE:-/data/honjar/ambient-omni/pixel-diffusion/run_scripts/lysine/run_dynamic_t_v2_queue.sh}
-GENDIR=/data/honjar/generated
-LOCKDIR=/data/honjar/train_logs/dynamic_t_v2/locks
-PY=/data/honjar/miniconda3/envs/ambient/bin/python
+QUEUE=${QUEUE:-${AMBIENT_BASE}/ambient-omni/pixel-diffusion/run_scripts/lysine/run_dynamic_t_v2_queue.sh}
+GENDIR=${AMBIENT_BASE}/generated
+LOCKDIR=${AMBIENT_BASE}/train_logs/dynamic_t_v2/locks
+PY=${AMBIENT_BASE}/miniconda3/envs/ambient/bin/python
 
 echo "[chain] GPU $GPU waiting for the seed-0 sweep to drain ($(date '+%F %T'))"
 

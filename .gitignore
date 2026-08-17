@@ -59,3 +59,6 @@ meeting*.md
 **/meeting*.md
 research_plan*.md
 **/research_plan*.md
+
+# Per-machine path overrides (see env.sh / SYNC.md)
+env.local.sh

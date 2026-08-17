@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.
+AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+
 #SBATCH --partition=csail-shared-h200
 #SBATCH --qos=shared-if-available
 #SBATCH --nodes=1
@@ -7,15 +11,15 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --job-name=eval_metrics
-#SBATCH --output=/data/scratch/honjar/train_logs/%j_eval_metrics.out
+#SBATCH --output=${AMBIENT_BASE}/train_logs/%j_eval_metrics.out
 
-export PATH=/data/scratch/honjar/miniconda3/envs/ambient/bin:$PATH
-export HF_HOME=/data/scratch/honjar/.cache/huggingface
-export TORCH_HOME=/data/scratch/honjar/.cache/torch
+export PATH=${AMBIENT_BASE}/miniconda3/envs/ambient/bin:$PATH
+export HF_HOME=${AMBIENT_BASE}/.cache/huggingface
+export TORCH_HOME=${AMBIENT_BASE}/.cache/torch
 
-cd /data/scratch/honjar/ambient-omni/pixel-diffusion
+cd ${AMBIENT_BASE}/ambient-omni/pixel-diffusion
 
-GENDIR=/data/scratch/honjar/generated
+GENDIR=${AMBIENT_BASE}/generated
 
 echo "================================================"
 echo "Metric Evaluation: wolves-only vs naive_all"

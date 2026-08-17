@@ -26,6 +26,10 @@
 
 set -u
 
+# Per-machine paths: see env.sh / SYNC.md at the repo root.
+AMBIENT_BASE="${AMBIENT_BASE:-$([ -d /data-local/honjar ] && echo /data-local/honjar || echo /data/scratch/honjar)}"
+
+
 GPU=${GPU:-0}
 SEED=${SEED:-0}
 BASE_PORT=${BASE_PORT:-11400}
@@ -35,16 +39,16 @@ export CUDA_VISIBLE_DEVICES=$GPU
 export MASTER_ADDR=localhost
 export WANDB_MODE=disabled
 
-cd /data/honjar/ambient-omni/pixel-diffusion
+cd ${AMBIENT_BASE}/ambient-omni/pixel-diffusion
 
-PY=/data/honjar/miniconda3/envs/ambient/bin/python
-HOLDOUT=/data/honjar/celeba_processed_v2b/holdout_64
-DATA=/data/honjar/annotated_datasets/celeba_dynamic_t_v2
-OUTDIR=/data/honjar/train_outputs/dynamic_t_v2
-GENDIR=/data/honjar/generated
+PY=${AMBIENT_BASE}/miniconda3/envs/ambient/bin/python
+HOLDOUT=${AMBIENT_BASE}/celeba_processed_v2b/holdout_64
+DATA=${AMBIENT_BASE}/annotated_datasets/celeba_dynamic_t_v2
+OUTDIR=${AMBIENT_BASE}/train_outputs/dynamic_t_v2
+GENDIR=${AMBIENT_BASE}/generated
 REF_CACHE=${GENDIR}/inception_holdout_feats.npz
-LOGDIR=/data/honjar/train_logs/dynamic_t_v2
-LOCKDIR=/data/honjar/train_logs/dynamic_t_v2/locks
+LOGDIR=${AMBIENT_BASE}/train_logs/dynamic_t_v2
+LOCKDIR=${AMBIENT_BASE}/train_logs/dynamic_t_v2/locks
 
 mkdir -p "$OUTDIR" "$LOGDIR" "$LOCKDIR"
 PORT_CTR=$((BASE_PORT + GPU * 100 + SEED * 10))

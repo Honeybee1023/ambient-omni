@@ -1,11 +1,20 @@
 """
 Collect v2b independence test results (shift tests + conditional sweep).
 Idempotent — re-run after new jobs finish to pick up new results.
-Output: /data/scratch/honjar/generated/v2b_indep_results.json
+Output: $AMBIENT_BASE/generated/v2b_indep_results.json
 """
+
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
 import json, os, glob, re
 
-GEN_DIR = "/data/scratch/honjar/generated"
+GEN_DIR = f"{AMBIENT_BASE}/generated"
 OUTPUT = os.path.join(GEN_DIR, "v2b_indep_results.json")
 ALL_RESULTS = os.path.join(GEN_DIR, "v2b_all_results.json")
 

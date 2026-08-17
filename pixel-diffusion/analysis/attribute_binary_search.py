@@ -11,6 +11,15 @@ Outputs:
 - Sanity check results
 """
 
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
+
 import os
 import json
 import numpy as np
@@ -19,15 +28,15 @@ import argparse
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--assignments", type=str,
-                        default="/data/scratch/honjar/annotated_datasets/bsearch_r1_assignments.npz",
+                        default=f"{AMBIENT_BASE}/annotated_datasets/bsearch_r1_assignments.npz",
                         help="Assignment matrix from dataset generation")
     parser.add_argument("--metrics_dir", type=str,
-                        default="/data/scratch/honjar/generated",
+                        default=f"{AMBIENT_BASE}/generated",
                         help="Directory containing metric JSON files")
     parser.add_argument("--round", type=int, default=1)
     parser.add_argument("--num_models", type=int, default=20)
     parser.add_argument("--output", type=str,
-                        default="/data/scratch/honjar/generated/bsearch_r1_attribution.json",
+                        default=f"{AMBIENT_BASE}/generated/bsearch_r1_attribution.json",
                         help="Output JSON with attribution results")
     args = parser.parse_args()
 

@@ -9,6 +9,15 @@ Usage:
   python eval_new_metrics.py --image_dir /path/to/images [--prompt "a photo of a wolf"] [--max_images 1000]
 """
 
+# Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
+# than imported from ambient_paths because these scripts run from varying
+# depths and cwds, where an import would need sys.path surgery.
+import os as _os
+AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or (
+    "/data-local/honjar" if _os.path.isdir("/data-local/honjar") else "/data/scratch/honjar"
+)
+
+
 import argparse
 import os
 import glob
@@ -30,7 +39,7 @@ def load_aesthetic_model(device):
     )
     clip_model.eval()
 
-    cache_dir = "/data/scratch/honjar/.cache/aesthetic_predictor"
+    cache_dir = f"{AMBIENT_BASE}/.cache/aesthetic_predictor"
     os.makedirs(cache_dir, exist_ok=True)
     weight_path = os.path.join(cache_dir, "sa_0_4_vit_l_14_linear.pth")
 
