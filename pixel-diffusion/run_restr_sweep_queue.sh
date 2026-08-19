@@ -24,7 +24,15 @@ done
 AMBIENT_BASE="${AMBIENT_BASE:-/data/scratch/honjar}"
 export AMBIENT_BASE
 REPO="${AMBIENT_BASE}/ambient-omni/pixel-diffusion"
-STATE="${AMBIENT_BASE}/restr_sweep_state"
+# Overridable so a second instance can run alongside the first on the same host,
+# with its own queue and its own slot bookkeeping. Each card here uses ~33GB of
+# 143GB, so one job per GPU leaves most of the card idle; a second instance with
+# a disjoint slice of the queue doubles occupancy without touching the running
+# scheduler or its jobs. The two instances must never share a queue.
+STATE="${RESTR_STATE:-${AMBIENT_BASE}/restr_sweep_state}"
+# Re-invoke *this* file, not a fixed name, so instance B spawns instance B.
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+TMUX_SESSION="${RESTR_SESSION:-restr_sweep}"
 QUEUE="${STATE}/queue.txt"
 LOCK="${STATE}/queue.lock"
 LOGDIR="${STATE}/logs"
@@ -277,7 +285,7 @@ cmd_run() {
 
             log "launch $job on $gpu (${fm}MB free, ${fgn}MB foreign)"
             echo "$job" >> "${STATE}/started.txt"
-            setsid nohup bash "${REPO}/run_restr_sweep_queue.sh" wrap "$job" "$gpu" "$SEED" "$slot" \
+            setsid nohup bash "$SELF" wrap "$job" "$gpu" "$SEED" "$slot" \
                 > "${LOGDIR}/${job}.log" 2>&1 &
             echo $! > "${STATE}/gpu${slot}.pid"
             running=$((running+1)); launched=$((launched+1))
@@ -315,18 +323,22 @@ cmd_start() {
     # The scheduler lives in tmux, which outlives the ssh session that started it.
     # The jobs it spawns are setsid'd separately, so they survive even if the
     # scheduler or the whole tmux server goes away mid-run.
-    if tmux has-session -t restr_sweep 2>/dev/null; then
-        echo "tmux session 'restr_sweep' already exists -- attach with: tmux attach -t restr_sweep" >&2
+    if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+        echo "tmux session '$TMUX_SESSION' already exists -- attach with: tmux attach -t $TMUX_SESSION" >&2
         exit 1
     fi
-    tmux new-session -d -s restr_sweep \
-        "bash '${REPO}/run_restr_sweep_queue.sh' run 2>&1 | tee -a '${SCHED_LOG}'"
+    # The env must be restated inside the tmux command: a variable exported in
+    # the shell that runs `start` does not reach the process tmux spawns, and a
+    # second instance that silently falls back to the default state dir would
+    # share the first instance's queue instead of running its own.
+    tmux new-session -d -s "$TMUX_SESSION" \
+        "RESTR_STATE='$STATE' RESTR_SESSION='$TMUX_SESSION' bash '$SELF' run 2>&1 | tee -a '${SCHED_LOG}'"
     sleep 3
-    pgrep -f "run_restr_sweep_queue.sh run" | head -1 > "$SCHED_PID"
+    pgrep -f "$(basename "$SELF") run" | head -1 > "$SCHED_PID"
     if [ -s "$SCHED_PID" ]; then
-        echo "Scheduler started in tmux session 'restr_sweep' (pid $(cat "$SCHED_PID"))."
+        echo "Scheduler started in tmux session '$TMUX_SESSION' (pid $(cat "$SCHED_PID"))."
         echo "  log:    $SCHED_LOG"
-        echo "  attach: tmux attach -t restr_sweep"
+        echo "  attach: tmux attach -t $TMUX_SESSION"
     else
         echo "Scheduler failed to start -- check $SCHED_LOG" >&2; exit 1
     fi
