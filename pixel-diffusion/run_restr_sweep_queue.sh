@@ -139,18 +139,21 @@ already_done() {
 
 free_mb() { nvidia-smi --id="$1" --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null || echo 0; }
 
-# How much free memory this particular card must have before we take it. A run
-# settles near 33GB but spikes to ~46.5GB reserved on the first tick, so 55GB is
-# the floor anywhere. On a larger card ask for half of it instead: there the
-# neighbours are larger too, and an OOM costs hours of queue time. A fixed number
-# cannot serve both -- 70GB is right for a 143GB H200 but would mean an 80GB A100
-# never qualifies at all.
+# How much free memory this card must have before we take it. This is really an
+# occupancy cap, not an OOM guard: a job only needs ~33GB (46.5GB at its first
+# tick), so memory alone would happily fit four on a 143GB H200 -- but measured on
+# proline, per-job cost went 11.4 -> 36 sec/kimg going from two jobs on a card to
+# three. That is worse than linear, so three jobs per card has roughly *half* the
+# throughput of two. Requiring two thirds of the card free admits a first job
+# (143>96) and a second (110>96) but not a third (78<96), which is the fast point.
+# The 55GB floor keeps an 80GB A100 usable, where two thirds is about the same
+# number anyway. Override with MIN_FREE_MB to force a value.
 min_free_for() {
     if [ -n "$MIN_FREE_MB" ]; then echo "$MIN_FREE_MB"; return; fi
     local total; total=$(nvidia-smi --id="$1" --query-gpu=memory.total \
         --format=csv,noheader,nounits 2>/dev/null || echo 0)
-    local half=$(( ${total:-0} / 2 ))
-    if [ "$half" -gt 55000 ]; then echo "$half"; else echo 55000; fi
+    local cap=$(( ${total:-0} * 2 / 3 ))
+    if [ "$cap" -gt 55000 ]; then echo "$cap"; else echo 55000; fi
 }
 
 # Memory held on a card by processes that are not ours. Returns 0 when the card
