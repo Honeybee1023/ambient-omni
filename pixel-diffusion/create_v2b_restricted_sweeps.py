@@ -62,12 +62,24 @@ B2_FIXED_T = 0.55
 SWEEP_TS_FROM_055 = [0.55, 0.6, 0.65, 0.7, 0.8, 0.9, 0.95, 1.0]
 SWEEP_TS_FROM_050 = [0.50, 0.6, 0.65, 0.7, 0.8, 0.9, 0.95, 1.0]
 
+# Label is the dataset-name stem. The first three predate the later additions and
+# keep their bare names; anything new spells out both buckets ("b5g2" = sweep b5
+# given b2 fixed), because the swept bucket alone is no longer unique -- b3 is
+# swept against both b2 and b1.
 SWEEPS = [
-    # (name for the swept bucket, fixed bucket, T of fixed bucket, swept Ts)
-    ("b3", 3, 2, B2_FIXED_T, SWEEP_TS_FROM_055),
-    ("b4", 4, 2, B2_FIXED_T, SWEEP_TS_FROM_055),
-    ("b2", 2, 1, B1_FIXED_T, SWEEP_TS_FROM_050),
+    # (label, swept bucket, fixed bucket, T of fixed bucket, swept Ts)
+    ("b3",   3, 2, B2_FIXED_T, SWEEP_TS_FROM_055),
+    ("b4",   4, 2, B2_FIXED_T, SWEEP_TS_FROM_055),
+    ("b2",   2, 1, B1_FIXED_T, SWEEP_TS_FROM_050),
+    ("b5g2", 5, 2, B2_FIXED_T, SWEEP_TS_FROM_055),
 ]
+
+# T=1.00 collapses every sweep with the same fixed bucket onto one configuration
+# (the swept bucket goes inactive, leaving only the fixed bucket banded to ~inf),
+# so those points are already measured and must not be retrained:
+#   b5g2 T=1.00 == restr_b3_T100   (b2 alone @0.55)
+#   b3g1 T=1.00 == restr_b2_T100   (b1 alone @0.50)
+ALREADY_MEASURED = {"celeba_v2b_restr_b5g2_T100": "celeba_v2b_restr_b3_T100"}
 
 
 def t_to_sigma(t):
@@ -158,8 +170,11 @@ def main():
             names.append(name)
             if create_dataset(name, fixed, t_fixed, swept, t):
                 created += 1
+    queueable = [n for n in names if n not in ALREADY_MEASURED]
     with open(os.path.join(TVEC_DIR, "restr_sweep_manifest.json"), "w") as f:
-        json.dump(names, f, indent=2)
+        json.dump(queueable, f, indent=2)
+    for dup, src in ALREADY_MEASURED.items():
+        print(f"  NOT queued: {dup} -- same configuration as {src}")
     print(f"\n=== Done: {created} new datasets, {len(names)} total in the sweep ===")
 
 
