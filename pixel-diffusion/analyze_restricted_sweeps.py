@@ -54,12 +54,23 @@ COND = {
            0.6: (0.031427, 1), 0.65: (0.030644, 1), 0.7: (0.030748, 1),
            0.8: (0.032183, 1), 0.9: (0.030818, 1), 0.95: (0.032249, 1),
            0.99: (0.030772, 1), 1.0: (0.030296, 1)},
+    # b5 against b2 fixed -- the conditional sweep exists, all points single-run.
+    "b5g2": {0.0: (0.037695, 1), 0.2: (0.037055, 1), 0.4: (0.033269, 1),
+             0.45: (0.033491, 1), 0.5: (0.033363, 1), 0.525: (0.033132, 1),
+             0.6: (0.033879, 1), 0.7: (0.032832, 1), 0.8: (0.032900, 1),
+             0.9: (0.032929, 1), 0.95: (0.031427, 1), 0.99: (0.031624, 1)},
+    # b3 against b1 fixed has NO overlapping counterpart: the conditional sweeps
+    # only ever paired b2|b1, and b3/b4/b5|b2. So the "useless with overlap ->
+    # useful when restricted" comparison cannot be made for this one, and it is
+    # readable only against its own in-batch single-bucket baselines.
+    "b3g1": {},
 }
 
 # Spread between repeated runs of the same configuration, averaged over the T
 # values that actually got reruns. This is the bar a difference has to clear.
 # (Meeting prep quotes 0.00104 pooled across the dynamic-T arms -- same order.)
-POOLED_SD = {"b3": 0.000857, "b4": 0.000662, "b2": 0.000857}
+POOLED_SD = {"b3": 0.000857, "b4": 0.000662, "b2": 0.000857,
+             "b5g2": 0.000857, "b3g1": 0.000857}
 
 # Single-bucket configurations that the degenerate ends of each sweep reproduce.
 # Every one of these is thinly measured -- note in particular that no T=1.0
@@ -79,7 +90,13 @@ SWEEPS = [
     ("b3", "b2 fixed @0.55, sweeping b3", 0.55),
     ("b4", "b2 fixed @0.55, sweeping b4", 0.55),
     ("b2", "b1 fixed @0.50, sweeping b2", 0.50),
+    ("b5g2", "b2 fixed @0.55, sweeping b5", 0.55),
+    ("b3g1", "b1 fixed @0.50, sweeping b3", 0.50),
 ]
+
+# At T=1.00 the swept bucket goes inactive, so every sweep sharing a fixed bucket
+# collapses onto the same run. It is trained once and the others borrow it.
+SHARED_BASELINE = {"b4": "b3", "b5g2": "b3", "b3g1": "b2"}
 
 
 def t_from_suffix(s):
@@ -107,7 +124,9 @@ def main():
     restr = load_restricted()
     total = sum(len(v) for v in restr.values())
     print("=" * 78)
-    print(f"RESTRICTED-BUCKET SWEEPS -- {total}/24 experiments complete")
+    # 23 original + 7 (b5 given b2) + 7 (b3 given b1); the T=1.00 point of each
+    # later sweep is not retrained, it reuses the earlier sweep's identical run.
+    print(f"RESTRICTED-BUCKET SWEEPS -- {total}/37 experiments complete")
     print("=" * 78)
 
     if total == 0:
@@ -141,8 +160,8 @@ def main():
         # borrows it rather than repeating the run.
         base_fixed = data.get(1.0)
         shared = False
-        if base_fixed is None and label == "b4":
-            base_fixed = restr.get("b3", {}).get(1.0)
+        if base_fixed is None and label in SHARED_BASELINE:
+            base_fixed = restr.get(SHARED_BASELINE[label], {}).get(1.0)
             shared = base_fixed is not None
         base_swept = data.get(t_fixed)    # swept bucket solo
 
@@ -167,7 +186,7 @@ def main():
             gain = base_fixed - best
             print(f"\n  best interior point : T={best_t:.3f}  MIND={best:.6f}")
             print(f"  fixed bucket solo   : MIND={base_fixed:.6f}"
-                  + ("   (shared with the b3 sweep -- same config)" if shared else ""))
+                  + (f"   (shared with the {SHARED_BASELINE.get(label,'')} sweep -- same config)" if shared else ""))
             if base_swept is not None:
                 print(f"  swept bucket solo   : MIND={base_swept:.6f}")
             # Bar to clear: the spread between repeated runs of one configuration
@@ -178,6 +197,9 @@ def main():
                        else "no gain from splitting")
             print(f"  gain over fixed solo: {gain:+.6f}  (bar {bar:.6f})  -> {verdict}")
 
+            if not COND[label]:
+                print("  no overlapping counterpart exists for this pairing")
+                continue
             cond_best_t = min(COND[label], key=lambda t: COND[label][t][0])
             cb, cn = COND[label][cond_best_t]
             print(f"  overlapping sweep optimum was T={cond_best_t:.3f} "

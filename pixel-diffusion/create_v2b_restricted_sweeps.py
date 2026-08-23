@@ -72,6 +72,7 @@ SWEEPS = [
     ("b4",   4, 2, B2_FIXED_T, SWEEP_TS_FROM_055),
     ("b2",   2, 1, B1_FIXED_T, SWEEP_TS_FROM_050),
     ("b5g2", 5, 2, B2_FIXED_T, SWEEP_TS_FROM_055),
+    ("b3g1", 3, 1, B1_FIXED_T, SWEEP_TS_FROM_050),
 ]
 
 # T=1.00 collapses every sweep with the same fixed bucket onto one configuration
@@ -79,7 +80,8 @@ SWEEPS = [
 # so those points are already measured and must not be retrained:
 #   b5g2 T=1.00 == restr_b3_T100   (b2 alone @0.55)
 #   b3g1 T=1.00 == restr_b2_T100   (b1 alone @0.50)
-ALREADY_MEASURED = {"celeba_v2b_restr_b5g2_T100": "celeba_v2b_restr_b3_T100"}
+ALREADY_MEASURED = {"celeba_v2b_restr_b5g2_T100": "celeba_v2b_restr_b3_T100",
+                    "celeba_v2b_restr_b3g1_T100": "celeba_v2b_restr_b2_T100"}
 
 
 def t_to_sigma(t):
