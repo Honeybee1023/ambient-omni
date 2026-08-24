@@ -6,11 +6,18 @@
 # that gap: every 15 min it resubmits any assigned run that has no result and
 # no job in the queue, up to MAX_ATTEMPTS times.
 #
-# Runs in tmux ON THE LOGIN NODE so it survives ssh dropping -- CSAIL access is
-# unreliable and nothing here may depend on an operator being reachable.
+# Runs as a CPU Slurm job on tig-cpu (4-day walltime), NOT in login-node tmux:
+# login nodes reboot, and nothing here may depend on an operator being
+# reachable. Submit with --dependency=singleton on a fixed job name so a second
+# copy can never race the first into double-submitting.
 #
-#   tmux new-session -d -s dynwd 'bash watchdog_dyn_csail.sh'
-#   tmux attach -t dynwd
+#   sbatch -p tig-cpu --qos=tig-main -t 4-00:00:00 --requeue \
+#          --dependency=singleton -J dyn_watchdog \
+#          --wrap 'bash watchdog_dyn_csail.sh'
+#
+# Verified 2026-08-24 that sbatch works from inside a job on this cluster.
+# The attempts ledger lives on shared scratch, so a requeued watchdog resumes
+# its counts rather than granting every run a fresh 5 attempts.
 #
 # It only ever touches runs in RUNS below. proline owns the rest, and a run must
 # appear in exactly one machine's queue -- never widen this list without
