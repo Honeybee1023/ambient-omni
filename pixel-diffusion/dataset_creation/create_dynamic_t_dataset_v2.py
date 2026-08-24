@@ -1,5 +1,23 @@
 """Create the v2 dynamic-T dataset (lysine paths).
 
+!! WARNING -- THIS SCRIPT DOES NOT REPRODUCE THE DEPLOYED DATASET !!
+
+    As written it emits 182,599 images (all 7 blur buckets, non-target ones
+    parked at T=0.999). The `celeba_dynamic_t_v2` actually present on lysine and
+    proline -- the dataset EVERY dynamic-T result was trained on -- has only
+    26,514: b0 + b5, no parked buckets. Verified 2026-08-24; proline's
+    annotations.jsonl is md5 6de0f8d4004dc90a7a1282fe6aa95dcf.
+
+    Training on this script's output produces numbers NOT comparable to any
+    existing dynamic-T run. To stand the dataset up on a new machine, copy
+    annotations.jsonl from a machine that already has it and symlink exactly the
+    filenames it names.
+
+    Left unchanged rather than "fixed" because the drift direction is unknown:
+    either the script gained the parked buckets after the data was built, or the
+    data was built by an earlier variant. Changing it would only add a third
+    version.
+
 Design mirrors the existing *static* b5 sweep datasets exactly, so that dynamic
 runs are directly comparable to `celeba_v2b_b5_T*`:
 
@@ -104,7 +122,17 @@ def build(out_dir, include_corrupt=True):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--name", default="celeba_dynamic_t_v2")
+    ap.add_argument("--i-know-this-differs", action="store_true",
+                    help="required: acknowledge this does NOT reproduce the deployed dataset")
     args = ap.parse_args()
+
+    if not args.i_know_this_differs:
+        raise SystemExit(
+            "REFUSING: this emits all 7 buckets (182,599 images), but the deployed\n"
+            "celeba_dynamic_t_v2 is b0+b5 only (26,514). Training on the output is\n"
+            "not comparable to any existing dynamic-T result. Copy annotations.jsonl\n"
+            "from a machine that has it instead -- see the module docstring.\n"
+            "Pass --i-know-this-differs to override.")
 
     print(f"T=0.999 -> sigma_min={OFF_SIGMA:.4f} (used to park unused buckets)")
     build(os.path.join(OUT_ROOT, args.name), include_corrupt=True)

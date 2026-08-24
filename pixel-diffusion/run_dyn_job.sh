@@ -35,7 +35,12 @@ if [ -z "$RUN_NAME" ] || [ -z "$GPU_ID" ]; then
     echo "Usage: bash run_dyn_job.sh <run_name> <gpu_uuid> [seed] [slot]"; exit 2
 fi
 
-export CUDA_VISIBLE_DEVICES=$GPU_ID
+# Under Slurm the allocation already pins CUDA_VISIBLE_DEVICES to the GPUs we
+# were granted; overwriting it with our own id would point the job at a card
+# this job does not own. Pass the literal "slurm" to leave it alone.
+if [ "$GPU_ID" != "slurm" ]; then
+    export CUDA_VISIBLE_DEVICES=$GPU_ID
+fi
 export PATH=${AMBIENT_BASE}/miniconda3/envs/ambient/bin:$PATH
 export PYTHONPATH=${AMBIENT_BASE}/ambient-omni/pixel-diffusion
 export HF_HOME=${AMBIENT_BASE}/.cache/huggingface
@@ -83,7 +88,11 @@ print(json.dumps(r[0]['schedule'],separators=(',',':')))
 
 echo "=== $NAME | GPU $GPU_ID (slot $SLOT) | seed $TRAIN_SEED | $(date) ==="
 echo "    schedule: $SCHEDULE"
-nvidia-smi --id="$GPU_ID" --query-gpu=index,uuid,memory.free --format=csv,noheader 2>/dev/null
+if [ "$GPU_ID" = "slurm" ]; then
+    nvidia-smi --query-gpu=index,uuid,memory.free --format=csv,noheader 2>/dev/null
+else
+    nvidia-smi --id="$GPU_ID" --query-gpu=index,uuid,memory.free --format=csv,noheader 2>/dev/null
+fi
 
 # --- Train (resume from the newest state dump if a previous attempt died) ---
 if [ ! -f "$CKPT" ]; then
