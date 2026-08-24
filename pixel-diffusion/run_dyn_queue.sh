@@ -54,6 +54,11 @@ MAX_ATTEMPTS=${MAX_ATTEMPTS:-4}
 # the card the job actually lands on, which is the real protection.
 FOREIGN_MAX_MB=${FOREIGN_MAX_MB:-100000000}
 MIN_FREE_MB=${MIN_FREE_MB:-}
+# Which dataset the jobs train on. Must be restated in the tmux command below
+# and exported here: tmux does not inherit the launching shell's environment,
+# and a scheduler that silently fell back to the default would put lysine on its
+# own 182,598-image build instead of the 26,514 one the rest of the batch uses.
+export DYN_DATASET="${DYN_DATASET:-}"
 POLL=${POLL:-60}
 STAGGER=${STAGGER:-45}
 SEED=${SEED:-0}
@@ -294,7 +299,7 @@ cmd_start() {
     # second instance falling back to the default state dir would silently share
     # the first instance's queue.
     tmux new-session -d -s "$TMUX_SESSION" \
-        "DYN_STATE='$STATE' DYN_SESSION='$TMUX_SESSION' SLOTS_PER_GPU='$SLOTS_PER_GPU' SEED='$SEED' GPUS='$GPUS' bash '$SELF' run 2>&1 | tee -a '${SCHED_LOG}'"
+        "DYN_STATE='$STATE' DYN_SESSION='$TMUX_SESSION' SLOTS_PER_GPU='$SLOTS_PER_GPU' SEED='$SEED' GPUS='$GPUS' DYN_DATASET='${DYN_DATASET:-}' bash '$SELF' run 2>&1 | tee -a '${SCHED_LOG}'"
     sleep 3
     # tmux session presence, not pgrep: `pgrep -f "<script> run"` matches the
     # pgrep process itself, so it can never report zero.
