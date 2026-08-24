@@ -59,6 +59,26 @@ else
     export WANDB_MODE=offline
 fi
 
+# Checkpoint cadence. On CSAIL we run as scavengers on a shared QOS and get
+# evicted mid-run, so dump every tick (50 kimg, ~9 min of work) instead of every
+# 5 (250 kimg, ~46 min). Detected from SLURM_JOB_ID rather than passed in, so
+# jobs already sitting in the queue pick it up when they start -- no resubmit.
+#
+# snap and dump must move TOGETHER: train.py derives the network-snapshot .pkl
+# name from the training-state .pt it resumes from (train.py:226), so a state
+# dump with no matching snapshot at the same kimg is not resumable.
+#
+# Cost at snap=dump=1: 223MB pkl + 669MB pt per checkpoint, 40 of each over a
+# 2000 kimg run = ~36GB transient per run, reclaimed at the end. CSAIL scratch
+# had 4.7TB free.
+if [ -n "${SLURM_JOB_ID:-}" ]; then
+    SNAP_TICKS=${SNAP_TICKS:-1}
+    DUMP_TICKS=${DUMP_TICKS:-1}
+else
+    SNAP_TICKS=${SNAP_TICKS:-5}
+    DUMP_TICKS=${DUMP_TICKS:-5}
+fi
+
 PYTHON=${AMBIENT_BASE}/miniconda3/envs/ambient/bin/python
 BASE=${AMBIENT_BASE}
 cd ${AMBIENT_BASE}/ambient-omni/pixel-diffusion || exit 1
@@ -88,6 +108,7 @@ print(json.dumps(r[0]['schedule'],separators=(',',':')))
 
 echo "=== $NAME | GPU $GPU_ID (slot $SLOT) | seed $TRAIN_SEED | $(date) ==="
 echo "    schedule: $SCHEDULE"
+echo "    checkpoint every $((DUMP_TICKS * 50)) kimg (snap=$SNAP_TICKS dump=$DUMP_TICKS)"
 if [ "$GPU_ID" = "slurm" ]; then
     nvidia-smi --query-gpu=index,uuid,memory.free --format=csv,noheader 2>/dev/null
 else
@@ -109,7 +130,8 @@ if [ ! -f "$CKPT" ]; then
     # click byte-for-byte.
     $PYTHON -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
         --outdir="$RUNDIR" --nosubdir --data="$DATA" --expr_id="$NAME" \
-        --cond=0 --arch=ddpmpp --batch=64 --tick=50 --snap=5 --dump=5 \
+        --cond=0 --arch=ddpmpp --batch=64 --tick=50 \
+        --snap=$SNAP_TICKS --dump=$DUMP_TICKS \
         --corruption_probability=0.0 --noise_config=identity --s_max=4 \
         --cache=False --duration=2 --seed=$TRAIN_SEED --workers=8 \
         --t_schedule="$SCHEDULE" $RESUME
