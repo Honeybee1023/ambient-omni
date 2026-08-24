@@ -84,7 +84,15 @@ BASE=${AMBIENT_BASE}
 cd ${AMBIENT_BASE}/ambient-omni/pixel-diffusion || exit 1
 
 MANIFEST="${BASE}/generated/dyn_search_manifest.json"
-DATA="${BASE}/annotated_datasets/celeba_dynamic_t_v2"
+# Which dataset. TWO exist under the name celeba_dynamic_t_v2: lysine carries
+# the historical 182,598-image build (b0+b5 plus five parked buckets, what every
+# mind_v2_* reference was trained on), while proline and CSAIL carry a
+# 26,514-image b0+b5-only variant. This search runs entirely on the 26,514 one,
+# so lysine must be pointed at a matching copy rather than its own default.
+# Phase 0 measured the two as indistinguishable (<0.00065 apart, noise 0.00099),
+# but the batch stays on one file regardless -- mixing them would reintroduce
+# exactly the cross-era comparison this project keeps getting burned by.
+DATA="${BASE}/annotated_datasets/${DYN_DATASET:-celeba_dynamic_t_v2}"
 HOLDOUT="${BASE}/celeba_processed_v2b/holdout_64"
 MIND_REF="${BASE}/generated/mind_ref_cache.npz"
 NAME="dyn_${RUN_NAME}_s${TRAIN_SEED}"
@@ -109,6 +117,7 @@ print(json.dumps(r[0]['schedule'],separators=(',',':')))
 echo "=== $NAME | GPU $GPU_ID (slot $SLOT) | seed $TRAIN_SEED | $(date) ==="
 echo "    schedule: $SCHEDULE"
 echo "    checkpoint every $((DUMP_TICKS * 50)) kimg (snap=$SNAP_TICKS dump=$DUMP_TICKS)"
+echo "    dataset: $DATA ($(wc -l < "$DATA/annotations.jsonl" 2>/dev/null || echo '?') annotations)"
 if [ "$GPU_ID" = "slurm" ]; then
     nvidia-smi --query-gpu=index,uuid,memory.free --format=csv,noheader 2>/dev/null
 else

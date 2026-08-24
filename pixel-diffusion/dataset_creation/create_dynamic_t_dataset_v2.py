@@ -1,22 +1,23 @@
 """Create the v2 dynamic-T dataset (lysine paths).
 
-!! WARNING -- THIS SCRIPT DOES NOT REPRODUCE THE DEPLOYED DATASET !!
+NOTE -- TWO DATASETS EXIST UNDER THIS NAME. CHECK WHICH ONE YOU HAVE.
 
-    As written it emits 182,599 images (all 7 blur buckets, non-target ones
-    parked at T=0.999). The `celeba_dynamic_t_v2` actually present on lysine and
-    proline -- the dataset EVERY dynamic-T result was trained on -- has only
-    26,514: b0 + b5, no parked buckets. Verified 2026-08-24; proline's
-    annotations.jsonl is md5 6de0f8d4004dc90a7a1282fe6aa95dcf.
+    This script emits 182,598 images: b0 + b5 + the other five buckets parked at
+    T=0.999. That IS the historical dataset -- lysine's
+    v2_warmup_0to095_s0/log.txt reads "Num annotations: 182598", so every
+    `mind_v2_*` reference value was trained on it (md5 ff4d600417d0819250ace4621e7e5795).
 
-    Training on this script's output produces numbers NOT comparable to any
-    existing dynamic-T run. To stand the dataset up on a new machine, copy
-    annotations.jsonl from a machine that already has it and symlink exactly the
-    filenames it names.
+    proline and CSAIL instead carry a 26,514-image b0+b5-only variant
+    (md5 6de0f8d4004dc90a7a1282fe6aa95dcf), which is what the 2026-08 discrete
+    schedule search runs on. The two are indistinguishable in practice -- the
+    parked buckets are eligible only for sigma > 14.18, about 0.066% of draws --
+    and Phase 0 measured the gap directly: static T=0.50 gave 0.034904 on the
+    26,514 variant against a 0.035229 3-seed reference on the 182,598 one, and
+    warmup 0->0.95 gave 0.030261 against 0.029622. Both well inside the 0.00099
+    run-to-run noise.
 
-    Left unchanged rather than "fixed" because the drift direction is unknown:
-    either the script gained the parked buckets after the data was built, or the
-    data was built by an earlier variant. Changing it would only add a third
-    version.
+    So: comparable, but not the same file. Check "Num annotations" in a run's
+    log before comparing its number to anything.
 
 Design mirrors the existing *static* b5 sweep datasets exactly, so that dynamic
 runs are directly comparable to `celeba_v2b_b5_T*`:
@@ -122,17 +123,7 @@ def build(out_dir, include_corrupt=True):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--name", default="celeba_dynamic_t_v2")
-    ap.add_argument("--i-know-this-differs", action="store_true",
-                    help="required: acknowledge this does NOT reproduce the deployed dataset")
     args = ap.parse_args()
-
-    if not args.i_know_this_differs:
-        raise SystemExit(
-            "REFUSING: this emits all 7 buckets (182,599 images), but the deployed\n"
-            "celeba_dynamic_t_v2 is b0+b5 only (26,514). Training on the output is\n"
-            "not comparable to any existing dynamic-T result. Copy annotations.jsonl\n"
-            "from a machine that has it instead -- see the module docstring.\n"
-            "Pass --i-know-this-differs to override.")
 
     print(f"T=0.999 -> sigma_min={OFF_SIGMA:.4f} (used to park unused buckets)")
     build(os.path.join(OUT_ROOT, args.name), include_corrupt=True)
