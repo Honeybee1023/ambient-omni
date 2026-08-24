@@ -82,6 +82,29 @@ def compute_scheduled_sigma_min(t_schedule, progress):
             t_val = t_start + (t_mid - t_start) * (progress / 0.5)
         else:
             t_val = t_mid + (t_end - t_mid) * ((progress - 0.5) / 0.5)
+    elif stype == 'piecewise':
+        # Discrete schedule: a list of [training_fraction, T] control points with
+        # linear interpolation between them. This is the representation the 4D
+        # schedule search optimises over -- 5 points at fractions
+        # [0, .25, .5, .75, 1] turn "find the best T(p) curve" into "find the
+        # best 4-vector" (the first point is pinned at T=0).
+        #
+        # Any piecewise-linear schedule whose kinks land on control points is
+        # reproduced EXACTLY, not approximated: warmup_linear with
+        # warmup_frac=0.25 is [0, 0, .3167, .6333, .95] to within float error.
+        # Schedules with curvature (cosine) genuinely are approximated, which is
+        # what the Phase 0 cosine arms measure.
+        pts = t_schedule.get('control_points')
+        if not pts:
+            raise ValueError("piecewise t_schedule requires a non-empty 'control_points' list")
+        fracs = [float(p[0]) for p in pts]
+        tvals = [float(p[1]) for p in pts]
+        if any(b < a for a, b in zip(fracs, fracs[1:])):
+            raise ValueError(f'piecewise control_points must be sorted by training fraction, got {fracs}')
+        # np.interp clamps outside the knot range rather than extrapolating,
+        # which is what we want: progress tips just past 1.0 on the final tick,
+        # and linear extrapolation there would push T above the intended ceiling.
+        t_val = float(np.interp(progress, fracs, tvals))
     elif stype == 'none':
         # No masking at all (T=0 means sigma_min=0, use full range)
         return 0.0
