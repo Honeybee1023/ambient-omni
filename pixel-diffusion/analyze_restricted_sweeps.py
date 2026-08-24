@@ -29,15 +29,20 @@ import os, json, glob
 
 GENERATED = f"{AMBIENT_BASE}/generated"
 
-# --- Reference: the overlapping conditional sweeps, as (mean, n) per T ---
-# Pooled from every run of each configuration across lysine, CSAIL and proline,
-# deduplicated by filename. proline (/var/local/honjar) holds the _r2/_r3 reruns
-# and is where most of the b3/b4/b5 replication lives; v2b_all_results.json alone
-# carries only the first run of each point and is NOT sufficient here.
+# --- Reference: overlapping conditional sweeps -- NOT SEED-AVERAGED, DO NOT
+# --- TAKE AN ARGMIN OVER THESE.
 #
-# Averaged, no second bucket beats its own baseline by even one sd -- which is
-# the redundancy this experiment exists to explain. Single runs suggested
-# interior optima for b3/b4; that was noise.
+# These were pooled by filename across lysine, CSAIL and proline, so the curve
+# has n=3 at a few T values and n=1 at most others. An argmin across points of
+# unequal replication is meaningless: the n=1 points carry ~sqrt(3)x the variance
+# of the n=3 points and will take the minimum by chance. Earlier versions of this
+# file reported optima at T=0.55 / 0.80 / 0.95 from exactly this mistake.
+#
+# Per the project owner, properly seed-averaged conditional sweeps put the
+# optimum at T=1.00 for every "B2 fixed, other bucket swept" sweep -- the added
+# bucket is redundant. That data has not been located in this repo or on the
+# machines reachable from here; until it is, these values are usable only as
+# per-point references at matching T, never for locating an optimum.
 COND = {
     "b3": {0.0: (0.035958, 1), 0.2: (0.036571, 1), 0.4: (0.034723, 1),
            0.45: (0.033354, 2), 0.5: (0.031896, 2), 0.525: (0.032405, 1),
@@ -200,17 +205,20 @@ def main():
             if not COND[label]:
                 print("  no overlapping counterpart exists for this pairing")
                 continue
-            cond_best_t = min(COND[label], key=lambda t: COND[label][t][0])
-            cb, cn = COND[label][cond_best_t]
-            print(f"  overlapping sweep optimum was T={cond_best_t:.3f} "
-                  f"(MIND={cb:.6f}, n={cn})")
+            # Deliberately not reported: see the header. The reference curve is
+            # not seed-balanced, so its argmin is an artifact of which points
+            # happen to have one run instead of three.
+            print("  overlapping optimum: NOT COMPUTED -- reference curve is not "
+                  "seed-balanced (see header)")
             # Only claim the optimum moved if it also beat the baseline by more
             # than the replicate spread -- an interior argmin that is within noise
             # of T=1.0 is not evidence of anything, which is the trap the
             # single-run conditional results fell into.
-            if best_t < 1.0 and cond_best_t >= 1.0 and gain > bar:
-                print(f"  ** optimum moved off T=1.0 under restriction, by more than "
-                      f"the noise bar -- the hypothesis predicts exactly this **")
+            # The "did the optimum move off T=1.0" claim needs a trustworthy
+            # before-side, which we do not have. Report only the restricted side.
+            if best_t < 1.0 and gain > bar:
+                print(f"  ** restricted optimum is interior (T={best_t:.2f}) and clears "
+                      f"the noise bar; before/after vs overlap NOT established **")
 
     print("\n" + "=" * 78)
     print("Reminder: the old B2-only@0.55 was recorded as both 0.031144 and 0.032623")
