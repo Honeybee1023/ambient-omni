@@ -33,16 +33,23 @@ MAX_ATTEMPTS=${MAX_ATTEMPTS:-5}
 POLL=${POLL:-300}
 mkdir -p "$STATE"
 
-RUNS="p0_cosine_pw5 p0_cosine_pw10 p1_a_linear_0to095 p1_a_twophase_050 \
-p1_s_early_steep p1_s_early_mid p1_s_late_hard p1_s_late_extreme \
-p1_q_sobol00 p1_q_sobol01 p1_q_sobol02 p1_q_sobol03 p1_q_sobol04 \
-p1_q_sobol05 p1_q_sobol06 p1_q_sobol07 p1_q_sobol08 p1_q_sobol09"
+# The assignment lives in a file on shared scratch, not baked in here, and is
+# re-read every cycle: rebalancing between proline and CSAIL then needs no
+# restart of this job, and there is exactly one place that says who owns what.
+ASSIGNED="${STATE}/assigned_runs.txt"
 
 log() { echo "[$(date '+%F %T')] $*" >> "$LOG"; }
-log "watchdog up (pid $$), $(echo $RUNS | wc -w) runs assigned, max ${MAX_ATTEMPTS} attempts each"
+if [ ! -s "$ASSIGNED" ]; then
+    log "FATAL: no assignment file at $ASSIGNED -- refusing to guess what we own"
+    exit 1
+fi
+log "watchdog up (pid $$), $(wc -l < "$ASSIGNED") runs assigned, max ${MAX_ATTEMPTS} attempts each"
 
 while true; do
     done_n=0 pend_n=0 resub=0 exhausted=0
+    # Re-read every cycle so a rebalance takes effect without a restart.
+    RUNS=$(grep -v '^\s*$' "$ASSIGNED" 2>/dev/null | tr '\n' ' ')
+    if [ -z "$RUNS" ]; then log "assignment file empty -- skipping cycle"; sleep "$POLL"; continue; fi
     # One squeue call, not one per run: cheap, and avoids hammering the
     # controller with 18 queries every cycle.
     QNAMES=$(squeue -h -u "$(whoami)" -o "%j" 2>/dev/null)
@@ -69,7 +76,7 @@ while true; do
         sleep 2
     done
     log "cycle: done=${done_n} queued=${pend_n} resubmitted=${resub} exhausted=${exhausted}"
-    if [ "$done_n" -eq "$(echo $RUNS | wc -w)" ]; then
+    if [ "$done_n" -eq "$(echo $RUNS | wc -w)" ] && [ "$done_n" -gt 0 ]; then
         log "all assigned runs complete -- watchdog exiting."
         break
     fi
