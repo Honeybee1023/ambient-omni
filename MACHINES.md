@@ -7,6 +7,38 @@ with `pixel-diffusion/scripts/inventory.sh`.
 
 Snapshot taken 2026-08-16.
 
+## RULE: never kill a job you did not start
+
+**Every machine here is shared.** All three run under accounts used by more than
+one person and more than one project: `pbhat21` has held all four lysine A100s
+and later a single card; a `cov_capture.py` benchmark from
+`/var/local/honjar/diffusion/` took 52.9GB on each usable proline card; a
+`p3b_breadth` job shares the CSAIL account. Some of these run under **our own
+username** and are still not ours.
+
+So, without exception:
+
+- **Never `kill`, `pkill`, `scancel` or otherwise stop a process you did not
+  start yourself in this session.** Not if it is idle-looking, not if it is
+  using a GPU you want, not if it is under our username.
+- Wanting the GPU is not a reason. Wait for it, use another, or ask.
+- If a machine looks full, it *is* full. Report that; do not make room.
+
+Two habits that follow from this:
+
+1. **`pkill -f <pattern>` is banned** for anything but a pattern you can prove
+   matches only your own processes -- and even then prefer explicit PIDs
+   collected from `ps`. `-f` matches the *whole command line*, so it has
+   repeatedly matched the invoking shell itself, and it will just as happily
+   match a colleague's job that mentions the same dataset name.
+2. Before stopping anything, print `ps -o user=,pid=,cmd=` for every PID you are
+   about to touch and confirm each one is yours.
+
+Killing your *own* runs is fine, but check what it costs first: on 2026-08-24 a
+`scancel` issued without checking job state destroyed two CSAIL runs that had
+already finished training and generated all 5000 images. They were minutes from
+done. Guard reassignment with "skip if already RUNNING".
+
 ## Machines
 
 | | Lysine | CSAIL |

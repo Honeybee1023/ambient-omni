@@ -16,6 +16,13 @@
 
 set -u
 
+# HARD RULE: never kill a job you did not start yourself. Every machine here is
+# shared -- including under our own username -- so a process you did not launch
+# is somebody's work even when it looks idle or inconvenient. Wanting the GPU is
+# not a reason. `pkill -f` is banned: it matches whole command lines, so it has
+# hit the invoking shell and would just as happily hit a colleague's job that
+# mentions the same dataset. See MACHINES.md.
+
 for _c in /data-local/honjar /var/local/honjar /data/scratch/honjar; do
     [ -n "${AMBIENT_BASE:-}" ] && break
     [ -d "$_c" ] && AMBIENT_BASE="$_c"

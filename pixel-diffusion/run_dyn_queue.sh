@@ -18,6 +18,13 @@
 
 set -u
 
+# HARD RULE: never kill a job you did not start yourself. Every machine here is
+# shared -- including under our own username -- so a process you did not launch
+# is somebody's work even when it looks idle or inconvenient. Wanting the GPU is
+# not a reason. `pkill -f` is banned: it matches whole command lines, so it has
+# hit the invoking shell and would just as happily hit a colleague's job that
+# mentions the same dataset. See MACHINES.md.
+
 for _c in /data-local/honjar /var/local/honjar /data/scratch/honjar; do
     [ -n "${AMBIENT_BASE:-}" ] && break
     [ -d "$_c" ] && AMBIENT_BASE="$_c"
@@ -47,6 +54,16 @@ GPUS=${GPUS:-$(nvidia-smi --query-gpu=uuid --format=csv,noheader 2>/dev/null | t
 # on a 143GB H200 two jobs fit and a third does not; on an 80GB A100 the floor
 # admits only one, which is right -- two jobs peaking at 46.5GB each would
 # exceed the card during the first tick.
+# Upper bound on jobs per card. CHANGING THIS BETWEEN RESTARTS WHILE JOBS RUN
+# CORRUPTS THE SLOT MAP: slot = gpu_idx * SLOTS_PER_GPU + s, so the same slot
+# number points at a different card before and after. On lysine this left two
+# jobs sharing GPU 0 (36 sec/kimg each) while GPU 1 sat idle, because the new
+# mapping said slot1 = GPU 1 and slot1's pid file still held the old job's
+# wrapper. Pick the value at first start and leave it.
+#
+# Measured: A100 80GB wants 1 (solo 16.3 sec/kimg; two share at 36 each, which
+# is *less* total throughput, and one job alone reserves ~58GB so two would OOM
+# at the first tick). H200 143GB is fine with 2.
 SLOTS_PER_GPU=${SLOTS_PER_GPU:-2}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-4}
 # Off by default. Demanding an idle card deadlocks where the only reachable
