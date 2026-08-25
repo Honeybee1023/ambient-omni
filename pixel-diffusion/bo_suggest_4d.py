@@ -182,9 +182,31 @@ def main():
           f"{np.sqrt(np.exp(2*theta[5]) + floor**2):.3f} (floor {floor:.3f}) [standardised]")
     print(f"  -> in MIND units, noise sd = "
           f"{np.sqrt(np.exp(2*theta[5]) + floor**2) * sd_y:.6f}")
+    # Lengthscales that run to the optimiser's bounds mean the marginal
+    # likelihood is flat in that direction -- the data does not constrain it.
+    # At the lower bound the GP has decided the surface is wiggly enough to
+    # interpolate noise; at the upper bound it has given up on that coordinate.
+    # Either way the ARD ranking below is not evidence, and neither are the
+    # proposals. Loud, because the alternative is reading a small-n artifact as
+    # a finding -- which is this project's recurring failure mode.
+    LO, HI = 0.05, 2.0
+    pinned = [i for i, v in enumerate(ls) if v <= LO * 1.01 or v >= HI * 0.99]
+    if pinned:
+        names = ", ".join(f"T{i+2}={ls[i]:.2f}" for i in pinned)
+        print(f"  !! {len(pinned)}/4 lengthscales pinned at a bound ({names}).")
+        print(f"     The data does not identify these coordinates. With {len(X)} points"
+              " that is expected;")
+        print("     treat the ranking and the proposals as exploratory, not as structure.")
+        # Spread of each coordinate in the training set: a coordinate that barely
+        # varies cannot be identified no matter how good the model is.
+        for i in pinned:
+            col = X[:, i]
+            print(f"     T{i+2}: {len(np.unique(np.round(col,2)))} distinct values, "
+                  f"range [{col.min():.2f}, {col.max():.2f}], sd {col.std():.3f}")
     short = np.argsort(ls)
     print(f"  most influential coordinate: T{short[0]+2} (shortest lengthscale); "
-          f"least: T{short[-1]+2}")
+          f"least: T{short[-1]+2}"
+          + ("   [UNRELIABLE -- see pinned lengthscales above]" if pinned else ""))
 
     best_i = int(np.argmin(y))
     print(f"\nIncumbent: {rows[best_i]['name']}  x={np.round(X[best_i],3).tolist()}  "
