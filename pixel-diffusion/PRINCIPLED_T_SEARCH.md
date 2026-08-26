@@ -389,6 +389,45 @@ method should look instead: not at whether corrupted data is distinguishable, bu
 at whether including it still reduces held-out loss — a marginal-value question,
 not a distinguishability one.
 
+### Why it fails: only the early phase matters
+
+`pr_skill` (skill_ratio/baseline/1.05) came in at **0.042679** — worse than any of
+the 30 discrete runs. Not degenerate: it settled at T~0.78 with 16-18% of batches
+corrupt, a real but very restrictive schedule. Placing it alongside the others
+separates *how much* a schedule restricts from *when*:
+
+| schedule | T over first 25% | T over last 25% | mean T | MIND |
+|---|---|---|---|---|
+| `warmup40` (best) | 0.079 | 0.950 | 0.534 | 0.029537 |
+| warmup 0->0.95 | 0.000 | 0.792 | 0.356 | 0.030319 |
+| `pr_predvar` | 0.220 | 0.596 | 0.490 | 0.034158 |
+| `static_T050` | 0.500 | 0.500 | 0.500 | 0.034904 |
+| `early_steep` | 0.299 | 0.850 | 0.637 | 0.038194 |
+| `pr_skill` | 0.462 | 0.783 | 0.697 | 0.042679 |
+
+```
+r(T over first 25%, MIND) = +0.785      restricting early hurts, badly
+r(T over last  25%, MIND) = -0.137      restricting late barely registers
+r(mean T,           MIND) = +0.829      driven entirely by the early term
+```
+
+The best schedule settles it on its own: `warmup40` has a **higher** mean T than
+`pr_predvar` (0.534 vs 0.490) and is 5.2 sd **better**, purely because its
+restriction is back-loaded. So the rule is not "use more corrupted data", it is
+**"use it early"** — the first quarter of training decides the outcome and the
+last quarter is nearly free.
+
+That is exactly the window the probe gets wrong. Its reading climbs from 0 to
+~0.57 inside the first 400 kimg (section 4.2b), so it starts restricting
+precisely when restriction is most expensive. The failure is not a bad threshold;
+a probe faithfully tracking distinguishability *must* rise there, because that is
+when the model actually learns to distinguish. The criterion and the objective
+point in opposite directions during the only phase that matters.
+
+Caveat: n=6 and the points are not independent, so treat +0.785 as direction and
+mechanism rather than a calibrated effect size. The ordering and the `warmup40`
+counterexample carry the argument, not the coefficient.
+
 ### Cost, confirmed on a finished run
 
 1308 s of probing across 20 probes, against ~34,280 s of training: **3.8%**,
