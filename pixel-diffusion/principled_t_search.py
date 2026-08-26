@@ -172,6 +172,24 @@ RUNS = [
 # would train a model at a constant T and tell us nothing.
 ABLATIONS = [
     {
+        # The targeted fix, motivated by the measured result rather than guessed.
+        # MIND tracks T over the FIRST quarter of training (r = +0.83, n=7) and is
+        # blind to T over the last (r = +0.06). The probe's reading rises fastest
+        # in exactly that first quarter -- correctly, since that is when the model
+        # learns to distinguish -- so it restricts data precisely when restriction
+        # is most expensive. Holding T=0 through the first 25% lets the probe set
+        # the ceiling without paying that cost.
+        #
+        # This is the run that decides whether the probe is salvageable: if it
+        # reaches the warmup plateau (~0.0295-0.0312), the probe's late-phase
+        # reading is fine and only its early behaviour was wrong.
+        "name": "pr_predvar_hold25",
+        "note": "pred_var probe, but T held at 0 for the first 25% of training.",
+        "schedule": {"type": "principled",
+                     "probe": probe(metric="pred_var", rule="fixed",
+                                    threshold=1.10, hold_until=0.25)},
+    },
+    {
         # Promoted out of the ablation set once gt_warmup showed T_raw genuinely
         # ramps (0 -> 0.57 over the first 400 kimg). The controller's EMA holds
         # the APPLIED T well below the raw reading early on -- 0.05 vs 0.17 at

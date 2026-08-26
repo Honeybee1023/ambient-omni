@@ -611,6 +611,14 @@ class ProbeController:
         self.q = cfg.get("q", None)
         self.alpha = float(cfg.get("alpha", 0.3))
         self.monotone = bool(cfg.get("monotone", False))
+        # Hold t_init until this fraction of training has passed, then start
+        # obeying the probe. Motivated by the measured result that MIND tracks T
+        # over the FIRST quarter of training (r = +0.83) and is nearly blind to T
+        # over the last (r = +0.06), while the probe's reading -- correctly --
+        # rises fastest in exactly that first quarter. Holding lets the probe set
+        # the ceiling without letting it restrict data during the only phase
+        # where restriction is expensive.
+        self.hold_until = float(cfg.get("hold_until", 0.0))
         self.max_step = cfg.get("max_step", None)
         self.image_dir = cfg.get("image_dir")
 
@@ -691,7 +699,8 @@ class ProbeController:
                     continue          # a torn final line from a killed process
         if last is None:
             return False
-        self.current_T = float(last.get("T_smoothed", last.get("T_raw", self.current_T)))
+        self.current_T = float(last.get("T_current",
+                               last.get("T_smoothed", last.get("T_raw", self.current_T))))
         self.raw_T = float(last.get("T_raw", self.current_T))
         self.n_probes = int(last.get("probe_index", 0)) + 1
         self.next_kimg = float(last.get("kimg", 0.0)) + self.every_kimg
@@ -730,6 +739,10 @@ class ProbeController:
             "T_previous": prev,
             "T_applied": self.current_T if apply_to_schedule else None,
             "applied": bool(apply_to_schedule),
+            # The controller's actual state, which is NOT T_smoothed while the
+            # hold is in force. restore() must read this one: keying off
+            # T_smoothed would resume a preempted run at a T it never trained at.
+            "T_current": self.current_T,
             "controller": {"metric": self.metric, "rule": self.rule,
                            "threshold": self.threshold, "q": self.q,
                            "alpha": self.alpha, "monotone": self.monotone,

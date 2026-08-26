@@ -436,7 +436,10 @@ def training_loop(
             progress = cur_nimg / (total_kimg * 1000)
 
             if probe_ctrl is not None and probe_ctrl.due(cur_nimg):
-                driving = (t_schedule.get('type') == 'principled')
+                # `hold_until` keeps T at t_init through the early phase; the
+                # probe still runs and logs, it just does not steer yet.
+                driving = (t_schedule.get('type') == 'principled'
+                           and progress >= probe_ctrl.hold_until)
                 rec = probe_ctrl.step(ema, cur_nimg, total_kimg, apply_to_schedule=driving)
                 dist.print0(
                     f"Probe {rec['probe_index']:>3d} @ {rec['kimg']:>7.1f} kimg  "
