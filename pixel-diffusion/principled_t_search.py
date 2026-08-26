@@ -111,14 +111,14 @@ RUNS = [
         "note": "energy-corrected MSE (blind_mse). The MSE metric whose null is "
                 "genuinely 1.0 at every sigma.",
         "schedule": {"type": "principled",
-                     "probe": probe(metric="skill_ratio", rule="baseline", threshold=1.02)},
+                     "probe": probe(metric="skill_ratio", rule="baseline", threshold=1.05)},
     },
     {
         "name": "pr_predvar",
         "note": "prediction variance across noise draws; nuisance-free by "
                 "construction (exactly 1.0 for a blind denoiser).",
         "schedule": {"type": "principled",
-                     "probe": probe(metric="pred_var", rule="fixed", threshold=1.05)},
+                     "probe": probe(metric="pred_var", rule="fixed", threshold=1.10)},
     },
     {
         "name": "pr_lossratio",
@@ -126,16 +126,45 @@ RUNS = [
                 "carries the pixel-energy nuisance -- included as the "
                 "comparison that shows why the correction matters.",
         "schedule": {"type": "principled",
-                     "probe": probe(metric="loss_ratio", rule="fixed", threshold=1.05)},
+                     "probe": probe(metric="loss_ratio", rule="fixed", threshold=1.20)},
     },
     {
         "name": "pr_msegap",
         "note": "raw MSE gap as a paired t-statistic. Also uncorrected.",
         "schedule": {"type": "principled",
-                     "probe": probe(metric="mse_gap", rule="adaptive", threshold=2.0)},
+                     "probe": probe(metric="mse_gap", rule="baseline", threshold=16.0)},
     },
 ]
 
+# Thresholds above are not guesses -- they come from probe_checkpoint.py run over
+# eight rescued snapshots of dyn_p1_q_sobol08_s0, scored by analyze_probe.py. The
+# first set shipped here was degenerate for EVERY metric (nearly all pinned at
+# T=0.000, skill_ratio/baseline/1.02 at T=1.000), which would have spent ~36
+# GPU-hours training at a constant T. What the calibration says at each setting,
+# open loop, on that trajectory:
+#
+#   pred_var    /fixed   /1.10   0.00 0.52 0.57 0.62 0.62 0.62 0.52 0.47
+#   skill_ratio /baseline/1.05   0.00 0.67 0.72 0.72 0.72 0.72 0.72 0.67
+#   loss_ratio  /fixed   /1.20   0.00 0.92 0.92 0.92 0.92 0.92 0.92 0.92
+#   mse_gap     /baseline/16.0   0.00 0.88 0.88 0.92 0.92 0.92 0.92 0.88
+#
+# Read that honestly: apart from the jump off the untrained checkpoint, none of
+# them ramps. The per-sigma curves move only ~0.013 (pred_var) between 250 and
+# 1751 kimg against a spread of ~0.14 across sigma, and not monotonically. The
+# model learns to separate blurred from clean inside the first 12% of training
+# and its boundary then sits still, so the premise "the boundary drifts as the
+# model improves, recovering warmup" is NOT supported open loop.
+#
+# The runs go ahead anyway because open loop is not the experiment. Here T feeds
+# back into which data the model sees, which changes the next probe; that loop
+# cannot be simulated from a fixed trajectory. gt_warmup additionally probes a
+# model trained under the known-good curriculum rather than sobol08's.
+#
+# mse_gap is kept at the only non-degenerate setting found. Its paired
+# t-statistic runs 33-46 at EVERY sigma, because common random numbers make the
+# standard error tiny while the pixel-energy nuisance stays systematic -- a
+# t-test is the wrong instrument when the contamination is a bias, not noise.
+#
 # Rule ablations. Deliberately NOT queued by default: which thresholds are even
 # reachable is answered for free by the offline calibration
 # (probe_checkpoint.py) and by the gt_* counterfactual logs. Queueing them blind
