@@ -1,0 +1,623 @@
+{
+  "study": "discrete dynamic-T schedule search (Phase 0 validation + Phase 1 4-D search)",
+  "dates": "2026-08-23 .. 2026-08-25",
+  "objective": "MIND on 5000 generated images vs 20000-image holdout, lower is better",
+  "search_space": {
+    "control_fractions": [
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "t_at_fraction_0": "pinned to 0.0",
+    "vector": "x = [T2,T3,T4,T5] = T at fractions 0.25/0.50/0.75/1.00",
+    "constraint": "0 <= T2 <= T3 <= T4 <= T5 <= 1 (monotone)",
+    "interpolation": "linear between control points ('piecewise' t_schedule)"
+  },
+  "training_config": "batch=64 seed=0 s_max=4.0 total_kimg=2000 arch=ddpmpp --cond=0",
+  "dataset": {
+    "name": "celeba_dynamic_t_v2",
+    "variant_used": "b0+b5 only, 26514 annotations, md5 6de0f8d4004dc90a7a1282fe6aa95dcf",
+    "warning": "A SECOND dataset exists under this name: the historical 182598-image build (all 7 buckets, 5 parked at T=0.999) on lysine, which every mind_v2_* reference value was trained on. The two differ only in images eligible above sigma=14.18 (~0.066% of draws) and Phase 0 measured them as equivalent within noise. Check 'Num annotations' in a run log before comparing across studies."
+  },
+  "noise": {
+    "sd": 0.000886,
+    "method": "8 same-config replicate pairs, sigma^2 = mean(d^2)/2",
+    "note": "A single run can deviate by 2.7 sd (observed: cosine_pw5 pair differed by 0.00258). n=1 rankings among the top ~6 schedules are NOT meaningful."
+  },
+  "reference_values_seed_averaged": {
+    "static_T050": [
+      0.035229,
+      3
+    ],
+    "warmup25_0to095": [
+      0.029622,
+      3
+    ],
+    "linear_0to095": [
+      0.031211,
+      3
+    ],
+    "cosine_0to095": [
+      0.032169,
+      3
+    ],
+    "twophase_0_050_095": [
+      0.032425,
+      3
+    ],
+    "warmup15_0to095": [
+      0.029527,
+      1
+    ],
+    "warmup40_0to095": [
+      0.029433,
+      1
+    ],
+    "clean_only": [
+      0.044789,
+      3
+    ]
+  },
+  "provenance_note": "source='file' means a rescued JSON. source='transcribed' means the value was read from a run log while CSAIL was reachable and copied by hand; CSAIL holds the original. rescue_results.sh replaces transcribed values with files automatically if access returns. One transcribed value (q_sobol09 s0) was later confirmed by an independent seed-1 rerun agreeing to 6.7e-5.",
+  "runs": [
+    {
+      "name": "p0_cosine_pw10",
+      "phase": 0,
+      "x": [
+        0.142722,
+        0.475,
+        0.807278,
+        0.95
+      ],
+      "n": 1,
+      "mind_mean": 0.03199,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.03199
+      },
+      "sources": [
+        "transcribed"
+      ]
+    },
+    {
+      "name": "p0_cosine_pw5",
+      "phase": 0,
+      "x": [
+        0.139124,
+        0.475,
+        0.810876,
+        0.95
+      ],
+      "n": 2,
+      "mind_mean": 0.031538540631475986,
+      "mind_sd": 0.0018236166676665645,
+      "mind_by_run": {
+        "s0@lysine": 0.03282803234346783,
+        "s1@lysine": 0.030249048919484146
+      },
+      "sources": [
+        "file"
+      ]
+    },
+    {
+      "name": "p0_static_T050",
+      "phase": 0,
+      "x": [
+        0.5,
+        0.5,
+        0.5,
+        0.5
+      ],
+      "n": 1,
+      "mind_mean": 0.034904231351087674,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@proline": 0.034904231351087674
+      },
+      "sources": [
+        "file"
+      ]
+    },
+    {
+      "name": "p0_warmup_cont",
+      "phase": 0,
+      "x": null,
+      "n": 1,
+      "mind_mean": 0.030353519150334747,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@proline": 0.030353519150334747
+      },
+      "sources": [
+        "file"
+      ]
+    },
+    {
+      "name": "p0_warmup_pw10",
+      "phase": 0,
+      "x": [
+        0.026389,
+        0.316666,
+        0.633333,
+        0.95
+      ],
+      "n": 2,
+      "mind_mean": 0.029621978464139408,
+      "mind_sd": 0.0005643004748723304,
+      "mind_by_run": {
+        "s0@proline": 0.029222957771730392,
+        "s1@lysine": 0.03002099915654842
+      },
+      "sources": [
+        "file"
+      ]
+    },
+    {
+      "name": "p0_warmup_pw5",
+      "phase": 0,
+      "x": [
+        0.0,
+        0.316667,
+        0.633333,
+        0.95
+      ],
+      "n": 2,
+      "mind_mean": 0.03031858779937986,
+      "mind_sd": 0.001256948149113253,
+      "mind_by_run": {
+        "s0@proline": 0.03120738435921772,
+        "s1@proline": 0.029429791239541998
+      },
+      "sources": [
+        "file"
+      ]
+    },
+    {
+      "name": "p1_a_linear_0to095",
+      "phase": 1,
+      "x": [
+        0.2375,
+        0.475,
+        0.7125,
+        0.95
+      ],
+      "n": 1,
+      "mind_mean": 0.032766,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.032766
+      },
+      "sources": [
+        "transcribed"
+      ]
+    },
+    {
+      "name": "p1_a_twophase_050",
+      "phase": 1,
+      "x": [
+        0.25,
+        0.5,
+        0.725,
+        0.95
+      ],
+      "n": 1,
+      "mind_mean": 0.032056,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.032056
+      },
+      "sources": [
+        "transcribed"
+      ]
+    },
+    {
+      "name": "p1_a_warmup15_0to095",
+      "phase": 1,
+      "x": [
+        0.111765,
+        0.391176,
+        0.670588,
+        0.95
+      ],
+      "n": 2,
+      "mind_mean": 0.030874952759829363,
+      "mind_sd": 0.00026097665969369665,
+      "mind_by_run": {
+        "s0@proline": 0.03105949112563019,
+        "s1@proline": 0.030690414394028535
+      },
+      "sources": [
+        "file"
+      ]
+    },
+    {
+      "name": "p1_a_warmup40_0to095",
+      "phase": 1,
+      "x": [
+        0.0,
+        0.158333,
+        0.554167,
+        0.95
+      ],
+      "n": 2,
+      "mind_mean": 0.029537162546492766,
+      "mind_sd": 0.0003206862464583666,
+      "mind_by_run": {
+        "s0@proline": 0.02976392196599674,
+        "s1@lysine": 0.029310403126988797
+      },
+      "sources": [
+        "file"
+      ]
+    },
+    {
+      "name": "p1_q_sobol00",
+      "phase": 1,
+      "x": [
+        0.1005,
+        0.2156,
+        0.5927,
+        0.6678
+      ],
+      "n": 1,
+      "mind_mean": 0.033861,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.033861
+      },
+      "sources": [
+        "transcribed"
+      ]
+    },
+    {
+      "name": "p1_q_sobol01",
+      "phase": 1,
+      "x": [
+        0.2195,
+        0.227,
+        0.5662,
+        0.7445
+      ],
+      "n": 1,
+      "mind_mean": 0.032107764298748065,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.032107764298748065
+      },
+      "sources": [
+        "transcribed"
+      ]
+    },
+    {
+      "name": "p1_q_sobol02",
+      "phase": 1,
+      "x": [
+        0.2671,
+        0.2819,
+        0.3475,
+        0.9005
+      ],
+      "n": 1,
+      "mind_mean": 0.0320465656549827,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@proline": 0.0320465656549827
+      },
+      "sources": [
+        "file"
+      ]
+    },
+    {
+      "name": "p1_q_sobol03",
+      "phase": 1,
+      "x": [
+        0.4624,
+        0.8891,
+        0.9337,
+        0.9664
+      ],
+      "n": 1,
+      "mind_mean": 0.03819071625646843,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.03819071625646843
+      },
+      "sources": [
+        "transcribed"
+      ]
+    },
+    {
+      "name": "p1_q_sobol04",
+      "phase": 1,
+      "x": [
+        0.2659,
+        0.4414,
+        0.5207,
+        0.8165
+      ],
+      "n": 1,
+      "mind_mean": 0.031221610796163778,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.031221610796163778
+      },
+      "sources": [
+        "transcribed"
+      ]
+    },
+    {
+      "name": "p1_q_sobol05",
+      "phase": 1,
+      "x": [
+        0.1343,
+        0.4944,
+        0.8319,
+        0.8408
+      ],
+      "n": 1,
+      "mind_mean": 0.03242898717579564,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@proline": 0.03242898717579564
+      },
+      "sources": [
+        "file"
+      ]
+    },
+    {
+      "name": "p1_q_sobol06",
+      "phase": 1,
+      "x": [
+        0.0139,
+        0.0329,
+        0.1183,
+        0.8315
+      ],
+      "n": 1,
+      "mind_mean": 0.03523885465189775,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.03523885465189775
+      },
+      "sources": [
+        "transcribed"
+      ]
+    },
+    {
+      "name": "p1_q_sobol07",
+      "phase": 1,
+      "x": [
+        0.4529,
+        0.5957,
+        0.6419,
+        0.6947
+      ],
+      "n": 1,
+      "mind_mean": 0.03368463973903148,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.03368463973903148
+      },
+      "sources": [
+        "transcribed"
+      ]
+    },
+    {
+      "name": "p1_q_sobol09",
+      "phase": 1,
+      "x": [
+        0.0287,
+        0.3373,
+        0.4163,
+        0.9958
+      ],
+      "n": 2,
+      "mind_mean": 0.030617567534641545,
+      "mind_sd": 4.7577635764690156e-05,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.03058392506575951,
+        "s1@lysine": 0.030651210003523582
+      },
+      "sources": [
+        "file",
+        "transcribed"
+      ]
+    },
+    {
+      "name": "p1_q_sobol10",
+      "phase": 1,
+      "x": [
+        0.1652,
+        0.4043,
+        0.5422,
+        0.61
+      ],
+      "n": 1,
+      "mind_mean": 0.0334693138271771,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.0334693138271771
+      },
+      "sources": [
+        "transcribed"
+      ]
+    },
+    {
+      "name": "p1_q_sobol11",
+      "phase": 1,
+      "x": [
+        0.1022,
+        0.2306,
+        0.5528,
+        0.7815
+      ],
+      "n": 1,
+      "mind_mean": 0.031528179963325374,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.031528179963325374
+      },
+      "sources": [
+        "transcribed"
+      ]
+    },
+    {
+      "name": "p1_s_ceiling_050",
+      "phase": 1,
+      "x": [
+        0.15,
+        0.3,
+        0.45,
+        0.5
+      ],
+      "n": 1,
+      "mind_mean": 0.034654899563992266,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@proline": 0.034654899563992266
+      },
+      "sources": [
+        "file"
+      ]
+    },
+    {
+      "name": "p1_s_ceiling_100",
+      "phase": 1,
+      "x": [
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "n": 1,
+      "mind_mean": 0.03223261717893386,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@proline": 0.03223261717893386
+      },
+      "sources": [
+        "file"
+      ]
+    },
+    {
+      "name": "p1_s_early_mid",
+      "phase": 1,
+      "x": [
+        0.45,
+        0.6,
+        0.75,
+        0.95
+      ],
+      "n": 1,
+      "mind_mean": 0.033732,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.033732
+      },
+      "sources": [
+        "transcribed"
+      ]
+    },
+    {
+      "name": "p1_s_early_steep",
+      "phase": 1,
+      "x": [
+        0.6,
+        0.7,
+        0.8,
+        0.9
+      ],
+      "n": 1,
+      "mind_mean": 0.038194,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.038194
+      },
+      "sources": [
+        "transcribed"
+      ]
+    },
+    {
+      "name": "p1_s_late_extreme",
+      "phase": 1,
+      "x": [
+        0.0,
+        0.05,
+        0.15,
+        1.0
+      ],
+      "n": 2,
+      "mind_mean": 0.0319885370672397,
+      "mind_sd": 0.00022941209330705015,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.03182631822037608,
+        "s0@lysine": 0.03215075591410331
+      },
+      "sources": [
+        "file",
+        "transcribed"
+      ]
+    },
+    {
+      "name": "p1_s_late_hard",
+      "phase": 1,
+      "x": [
+        0.0,
+        0.0,
+        0.4,
+        0.95
+      ],
+      "n": 2,
+      "mind_mean": 0.03100744473290472,
+      "mind_sd": 0.0009077508605204088,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.031649321522006627,
+        "s0@lysine": 0.030365567943802817
+      },
+      "sources": [
+        "file",
+        "transcribed"
+      ]
+    },
+    {
+      "name": "p1_s_plateau_low",
+      "phase": 1,
+      "x": [
+        0.3,
+        0.5,
+        0.5,
+        0.5
+      ],
+      "n": 1,
+      "mind_mean": 0.03332300975062306,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@lysine": 0.03332300975062306
+      },
+      "sources": [
+        "file"
+      ]
+    },
+    {
+      "name": "p1_s_plateau_mid",
+      "phase": 1,
+      "x": [
+        0.2,
+        0.6,
+        0.6,
+        0.7
+      ],
+      "n": 1,
+      "mind_mean": 0.033074698414473615,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@csail-slurm": 0.033074698414473615
+      },
+      "sources": [
+        "transcribed"
+      ]
+    }
+  ]
+}
