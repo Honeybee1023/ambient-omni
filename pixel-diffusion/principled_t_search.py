@@ -55,25 +55,27 @@ WARMUP_0_TO_095 = [[0.0, 0.0], [0.25, 0.0], [0.5, 0.31667],
 
 # Shared probe settings.
 #   every_kimg 100 -> 20 probes over a 2000 kimg run, as specified.
-#   200 images x 2 draws x 20 levels x 2 arms = 16k forward passes per probe.
-#   Measured at 400 images this cost 12.4% of wall clock on a shared A100, well
-#   over the 5% budget; 200 (which is what the spec asked for in the first
-#   place) halves it. Each run reports its own cost live as `probe_ovh` in the
-#   tick line, so the real number is checked rather than assumed.
-#   batch_size 100 rather than 200: at 200 the probe pushed peak GPU memory from
-#   ~30 GB (training alone) to 43 GB, which would make two jobs no longer fit on
-#   one 80 GB A100. Halving the probe batch costs little and keeps the peak near
-#   training's own.
+#   160 images x 2 draws x 20 levels x 2 arms = 12.8k forward passes per probe.
+#   Measured, not guessed: 40.0 s per probe at 100 images on an idle H200 against
+#   14.78 sec/kimg training, so the spec's 200 images would have cost 5.4% of
+#   wall clock -- just over the 5% budget. 160 lands at ~4.3% and costs only a
+#   12% wider standard error on the paired gap, which the common-random-numbers
+#   design has already made small. Each run also reports its own cost live as
+#   `probe_ovh` in the tick line, so this is checked rather than assumed.
+#   batch_size 80 rather than 200: at 200 the probe pushed peak GPU memory from
+#   ~30 GB (training alone) to 43 GB, which would stop two jobs fitting on one
+#   80 GB A100. At 80 the peak is back to 29.97 GB -- training's own -- and 160
+#   images split into two even batches with no ragged tail.
 #   alpha 0.3 smooths the grid-quantised raw T over probes.
 #   monotone stays FALSE: the discrete search already told us the answer is
 #   non-decreasing, so enforcing it would hand the method its result and make
 #   "it discovered warmup" circular. Available as an ablation.
 PROBE_BASE = {
     "every_kimg": 100,
-    "n_images": 200,
+    "n_images": 160,
     "n_draws": 2,
     "n_levels": 20,
-    "batch_size": 100,
+    "batch_size": 80,
     "probe_seed": 12345,
     "alpha": 0.3,
     "monotone": False,

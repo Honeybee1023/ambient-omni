@@ -51,8 +51,12 @@ check("sigma is increasing in T", np.all(np.diff(P.t_to_sigma(grid)) > 0))
 print("\n-- boundary scan --")
 
 
-def res_from_flags(flags, key="loss_ratio", hi=2.0, lo=0.5):
-    """A minimal probe result whose `key` trips the fixed rule exactly on flags."""
+def res_from_flags(flags, key="loss_ratio", hi=2.0, lo=1.0):
+    """A minimal probe result whose `key` trips the fixed rule exactly on flags.
+
+    `lo` sits exactly ON the null (ratio 1.0). It cannot be 0.5: the divergence
+    test is two-sided, so 0.5 is as far from the null as 2.0 and would flag too.
+    """
     n = len(flags)
     return {"t_grid": list(P.make_t_grid(n)), "n_draws": 2,
             "per_sigma": [{key: (hi if f else lo)} for f in flags]}
@@ -113,9 +117,13 @@ res = {"t_grid": list(P.make_t_grid(n)), "n_draws": 2,
 
 t_fixed, d_fixed = P.decide_T(res, "loss_ratio", "fixed", 1.02)
 t_base, d_base = P.decide_T(res, "loss_ratio", "baseline", 1.02)
-check("fixed rule finds the boundary here (ratio does fall below 1.02)",
-      d_fixed["boundary_index"] == 4, f"index={d_fixed['boundary_index']}")
-check("baseline rule agrees", d_base["boundary_index"] == 4,
+# The tail sits at 0.94, which is 6% from a null of 1.0 -- in the other
+# direction, but the test is two-sided, so the uncorrected rule calls the whole
+# grid diverging. This is the real failure mode, not a contrived one: measured
+# on a real checkpoint the loss ratio never came near 1.0 at any sigma.
+check("fixed rule is fooled by a tail that is offset from 1.0", t_fixed == 1.0,
+      f"T={t_fixed}")
+check("baseline rule recovers the boundary", d_base["boundary_index"] == 4,
       f"index={d_base['boundary_index']}")
 
 # Now shift the whole curve up so the asymptote is 1.06 -- the arms are no more
@@ -124,7 +132,7 @@ res_shift = {"t_grid": res["t_grid"], "n_draws": 2,
              "per_sigma": [dict(r, loss_ratio=r["loss_ratio"] + 0.12) for r in res["per_sigma"]]}
 t_fixed2, d_fixed2 = P.decide_T(res_shift, "loss_ratio", "fixed", 1.02)
 t_base2, d_base2 = P.decide_T(res_shift, "loss_ratio", "baseline", 1.02)
-check("a constant offset breaks the fixed rule (pins T at 1.0)", t_fixed2 == 1.0,
+check("a shifted copy also breaks the fixed rule", t_fixed2 == 1.0,
       f"T={t_fixed2}")
 check("baseline rule is immune to the offset", d_base2["boundary_index"] == d_base["boundary_index"],
       f"index={d_base2['boundary_index']} vs {d_base['boundary_index']}")
@@ -247,6 +255,21 @@ for metric in ("skill_ratio", "pred_var"):
 t_bad, _ = P.decide_T(r_blind, "mse_gap", "baseline", 2.0)
 check("...while baseline-corrected raw MSE is fooled into a nonzero T",
       t_bad > 0.5, f"T={t_bad}")
+
+# Two-sided is not a detail: the real signal approaches its null from below.
+pv_real = [0.8726, 0.8574, 0.8485, 0.8446, 0.8444, 0.8472, 0.8525, 0.8598,
+           0.8685, 0.8783, 0.8891, 0.9010, 0.9147, 0.9306, 0.9477, 0.9638,
+           0.9768, 0.9862, 0.9949, 0.9982]      # measured, sobol08 @ 1001 kimg
+res_pv = {"t_grid": list(P.make_t_grid(20)), "n_draws": 2,
+          "per_sigma": [{"predvar_ratio": v} for v in pv_real]}
+t_pv, d_pv = P.decide_T(res_pv, "pred_var", "fixed", 1.02)
+check("a ratio converging to 1 from BELOW is still detected",
+      0.0 < t_pv < 1.0, f"T={t_pv}, diverging {d_pv['n_diverging']}/20")
+check("raising the threshold moves the boundary down",
+      P.decide_T(res_pv, "pred_var", "fixed", 1.10)[0]
+      < P.decide_T(res_pv, "pred_var", "fixed", 1.01)[0],
+      f"thr1.10 -> {P.decide_T(res_pv, 'pred_var', 'fixed', 1.10)[0]}, "
+      f"thr1.01 -> {P.decide_T(res_pv, 'pred_var', 'fixed', 1.01)[0]}")
 
 cut = float(P.t_to_sigma(0.5))
 r_sharp = P.run_probe(Sharp(clean, cut), clean, corrupt, t_grid=g20, n_draws=2, batch_size=8)

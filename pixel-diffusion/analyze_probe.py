@@ -37,8 +37,12 @@ AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or next(
 import argparse
 import json
 import os
+import sys
 
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from training import probe as P
 
 # warmup_linear(0 -> 0.95, warmup_frac=0.25), the discrete search's reference.
 REF_KNOTS = [(0.0, 0.0), (0.25, 0.0), (0.5, 0.31667), (0.75, 0.63333), (1.0, 0.95)]
@@ -102,6 +106,27 @@ def score(progress, traj, ref):
     }
 
 
+def rules_to_score():
+    """The threshold grid the report scans.
+
+    Wider than probe.COUNTERFACTUALS on purpose: this runs offline on stored
+    numbers, so a coarse sweep of each metric costs nothing and is the only way
+    to see which thresholds are even reachable before spending a training run.
+    """
+    out = []
+    for metric in ("skill_ratio", "pred_var", "loss_ratio"):
+        for thr in (1.005, 1.01, 1.02, 1.05, 1.10, 1.20):
+            out.append((metric, "fixed", thr, None))
+            out.append((metric, "baseline", thr, None))
+        out.append((metric, "percentile", 1.02, 0.90))
+    for thr in (1.0, 2.0, 4.0, 8.0, 16.0):
+        out.append(("mse_gap", "adaptive", thr, None))
+        out.append(("mse_gap", "baseline", thr, None))
+    for thr in (1.0, 2.0, 4.0, 8.0, 16.0):
+        out.append(("pred_var", "adaptive", thr, None))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--log", default=None, help="probe_log.jsonl from a run")
@@ -143,15 +168,38 @@ def main():
         else:
             print("\nlogging-only run: the probe rode along, it did not steer training.")
 
-    keys = sorted({k for r in recs for k in r.get("counterfactual_T", {})
-                   if not k.endswith("__error")})
+    # Decisions are RECOMPUTED from the stored per-sigma statistics, not read
+    # from the counterfactual_T the run wrote. The per-sigma numbers are the
+    # durable artifact; a threshold is a one-line function of them. Re-deriving
+    # here means a new threshold costs nothing, where trusting the stored values
+    # would mean re-probing every checkpoint to try a different one -- and the
+    # first calibration needed exactly that, because every threshold it shipped
+    # with turned out to be degenerate.
+    have_raw = all(r.get("probe", {}).get("per_sigma") for r in recs)
     rows = {}
-    for k in keys:
-        traj = [r.get("counterfactual_T", {}).get(k, float("nan")) for r in recs]
-        traj = [float("nan") if v is None else v for v in traj]
-        s = score(progress, traj, ref)
-        if s:
-            rows[k] = dict(s, trajectory=traj)
+    if have_raw:
+        for metric, rule, thr, q in rules_to_score():
+            k = f"{metric}/{rule}/{thr}"
+            traj = []
+            for r in recs:
+                try:
+                    t, _ = P.decide_T(r["probe"], metric, rule, thr, q)
+                except Exception:
+                    t = float("nan")
+                traj.append(t)
+            sc = score(progress, traj, ref)
+            if sc:
+                rows[k] = dict(sc, trajectory=traj)
+    else:
+        print("  (no per-sigma data; falling back to the stored counterfactuals)")
+        keys = sorted({k for r in recs for k in r.get("counterfactual_T", {})
+                       if not k.endswith("__error")})
+        for k in keys:
+            traj = [r.get("counterfactual_T", {}).get(k, float("nan")) for r in recs]
+            traj = [float("nan") if v is None else v for v in traj]
+            sc = score(progress, traj, ref)
+            if sc:
+                rows[k] = dict(sc, trajectory=traj)
 
     print(f"\n{'metric/rule/threshold':<32} {'span':>6} {'rmse':>6} {'rho':>6} "
           f"{'|dT|':>6} {'mono':>5} {'Tfin':>6}  verdict")

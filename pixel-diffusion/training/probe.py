@@ -389,6 +389,30 @@ def baseline_levels(result, n_top=N_BASELINE_LEVELS):
     return list(range(max(0, n - int(n_top)), n))
 
 
+def _ratio_excess(values, null=1.0):
+    """Two-sided deviation of a ratio from its null, in ratio units.
+
+    Divergence means "the model treats the arms differently", and that shows up
+    in EITHER direction. Measured on a real checkpoint, the prediction-variance
+    ratio runs 0.873 -> 0.998 across the grid: it converges on its null of 1.0
+    from BELOW, because the model's answer wobbles *less* on blurred inputs than
+    on clean ones. A one-sided `ratio > 1.05` test never fires on that, reports
+    "indistinguishable everywhere", and pins T at 0 for the whole run -- which is
+    exactly what the first calibration produced for every metric.
+
+    So the statistic is max(r/null, null/r), which is >= 1 and equals 1 only at
+    the null. A threshold keeps its natural reading: 1.05 means "5% away from
+    the null, either way".
+    """
+    v = np.asarray(values, dtype=np.float64)
+    if not np.isfinite(null) or null == 0:
+        return np.full(v.shape, np.nan)
+    r = v / null
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out = np.maximum(np.abs(r), 1.0 / np.abs(r))
+    return np.where(np.isfinite(v) & (v != 0), out, np.inf)
+
+
 def _as_flags(values, threshold):
     """`values > threshold`, with non-finite values counted as DIVERGING.
 
@@ -430,34 +454,34 @@ def _diverging_flags(result, metric, rule, threshold=None):
         key = {"mse_gap": "gap_t", "loss_ratio": "gap_t", "skill_ratio": "skill_t",
                "pred_var": "predvar_t"}[metric]
         thr = _ADAPTIVE_DEFAULT if threshold is None else float(threshold)
-        return _as_flags([float(r.get(key, 0.0)) for r in ps], thr)
+        # |t|, not t: a corrupt arm that is reliably *better* than the clean one
+        # is just as distinguishable as one that is reliably worse.
+        return _as_flags([abs(float(r.get(key, 0.0))) for r in ps], thr)
 
     if rule == "baseline":
         thr = _BASELINE_DEFAULT if threshold is None else float(threshold)
         base_idx = baseline_levels(result)
-        if metric in ("loss_ratio", "skill_ratio"):
-            # Scale-free already; correct multiplicatively and threshold in the
-            # same relative units the fixed rule uses (thr passed as e.g. 1.02).
-            vals = np.array([float(r[metric]) for r in ps])
+        if metric in ("loss_ratio", "skill_ratio", "pred_var"):
+            key = {"pred_var": "predvar_ratio"}.get(metric, metric)
+            vals = np.array([float(r.get(key, np.nan)) for r in ps])
             base = float(np.mean(vals[base_idx]))
-            if not np.isfinite(base) or base == 0:
-                # Cannot form the correction; fall back to the uncorrected test
-                # rather than returning "nothing diverges", which is the unsafe
-                # direction.
-                return _as_flags(vals, thr)
-            return _as_flags(vals / base, thr)
-        raw_key, se_key = {"mse_gap": ("gap_mean", "gap_se"),
-                           "pred_var": ("predvar_gap", "predvar_gap_se")}[metric]
+            return _as_flags(_ratio_excess(vals, base), thr)
+        raw_key, se_key = {"mse_gap": ("gap_mean", "gap_se")}[metric]
         vals = np.array([float(r.get(raw_key, np.nan)) for r in ps])
         ses = np.array([float(r.get(se_key, np.inf)) for r in ps])
         base = float(np.mean(vals[base_idx]))
         with np.errstate(invalid="ignore", divide="ignore"):
-            tstat = (vals - base) / ses
+            tstat = np.abs((vals - base) / ses)
         return _as_flags(tstat, thr)
 
     key = _METRICS[metric]["fixed_key"]
     thr = _FIXED_DEFAULT[metric] if threshold is None else float(threshold)
-    return _as_flags([float(r.get(key, float("nan"))) for r in ps], thr)
+    vals = [float(r.get(key, float("nan"))) for r in ps]
+    if metric == "mse_gap":
+        # A raw difference, not a ratio; its null is 0 and the test is on size.
+        return _as_flags(np.abs(vals), thr)
+    # Ratio metrics: null is 1.0 for the uncorrected test.
+    return _as_flags(_ratio_excess(vals, 1.0), thr)
 
 
 def _boundary_index(flags, rule, q=None):
