@@ -131,6 +131,7 @@ real test** (max |dT| = 0.033 at 5 knots vs 0.007 at 10) and it passes at
 | `p1_q_sobol00` | [0.10, 0.22, 0.59, 0.67] | 0.033861 | 1 | — | transcribed |
 | `p1_s_ceiling_050` | [0.15, 0.30, 0.45, 0.50] | 0.034655 | 1 | — | file |
 | `p0_static_T050` | [0.50, 0.50, 0.50, 0.50] | 0.034904 | 1 | — | file |
+| `p1_q_sobol08` | [0.35, 0.66, 0.78, 0.80] | 0.034496 | 1 | — | file |
 | `p1_q_sobol06` | [0.01, 0.03, 0.12, 0.83] | 0.035239 | 1 | — | transcribed |
 | `p1_q_sobol03` | [0.46, 0.89, 0.93, 0.97] | 0.038191 | 1 | — | transcribed |
 | `p1_s_early_steep` | [0.60, 0.70, 0.80, 0.90] | 0.038194 | 1 | — | transcribed |
@@ -155,7 +156,18 @@ Two BO design choices that are load-bearing, not cosmetic:
    `warmup_pw10` case above is exactly that failure caught in the wild.
 
 ## Status at time of writing
-Phase 0 complete (6/6). Phase 1 29/30 — `p1_q_sobol08` still training.
+Phase 0 complete (6/6). **Phase 1 complete, 30/30.** Zero job failures across the
+whole study.
+
+The final run, `p1_q_sobol08` [0.35,0.66,0.78,0.80], came in at 0.034496 — a poor
+schedule, and poor in the way finding 2 predicts: it ramps early and then
+plateaus, giving up the T=0 start that is worth ~5 sd. It changes no conclusion.
+The best schedules remain an unseparable plateau near MIND ~ 0.0295 led by
+`warmup40` [0.00,0.16,0.55,0.95] = 0.029537 (n=2).
+
+Two replicates (`sobol00_s1`, `sobol06_s1`) are still training and will raise
+those two points from n=1 to n=2; neither is a contender, so this is bookkeeping
+rather than anything that moves the ranking.
 Phase 2 **designed and validated but not run**: the GP identifies all four
 coordinates at n=26 (no lengthscale pinned at a bound, first time in the study),
 but its proposals were generated before `ceiling_100` landed and all push

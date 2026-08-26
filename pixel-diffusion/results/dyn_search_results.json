@@ -405,6 +405,25 @@
       ]
     },
     {
+      "name": "p1_q_sobol08",
+      "phase": 1,
+      "x": [
+        0.3483,
+        0.6593,
+        0.7762,
+        0.8036
+      ],
+      "n": 1,
+      "mind_mean": 0.034496353601031496,
+      "mind_sd": null,
+      "mind_by_run": {
+        "s0@utcs-lysine": 0.034496353601031496
+      },
+      "sources": [
+        "file"
+      ]
+    },
+    {
       "name": "p1_q_sobol09",
       "phase": 1,
       "x": [
