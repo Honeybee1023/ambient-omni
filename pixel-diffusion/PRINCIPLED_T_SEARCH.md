@@ -321,6 +321,25 @@ checked rather than assumed.
 
 ## 7. Results
 
+### The probe is non-invasive — first hard evidence
+
+`gt_warmup` follows warmup 0->0.95 with the probe attached but not steering, so
+it is the same configuration as the discrete search's `p0_warmup_pw5`. Measured:
+
+| | MIND | n |
+|---|---|---|
+| `gt_warmup` (probe attached) | 0.031173 | 1 |
+| `p0_warmup_pw5` (no probe) | 0.030319 | 2 |
+
+**+0.96 sd** apart on a run-to-run noise floor of 0.00089 — indistinguishable.
+Probing 20 times mid-run, 12.8k forward passes each, costs nothing measurable in
+final quality. That is the empirical counterpart to the RNG-isolation design
+(the probe draws from its own `torch.Generator`, so a probing run sees the same
+training batches as a non-probing one), and it is what makes the `gt_*` runs
+usable as ground truth rather than as a perturbed system.
+
+### Everything else
+
 **TODO** — MIND per run, discovered T trajectories vs the reference, which
 metric/rule tracked it, and whether any discovered schedule beats the discrete
 search's best (MIND ≈ 0.0295).

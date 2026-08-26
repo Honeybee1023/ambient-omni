@@ -261,14 +261,16 @@
         0.5927,
         0.6678
       ],
-      "n": 1,
-      "mind_mean": 0.033861,
-      "mind_sd": null,
+      "n": 2,
+      "mind_mean": 0.033121185163048794,
+      "mind_sd": 0.0010462561760612335,
       "mind_by_run": {
-        "s0@csail-slurm": 0.033861
+        "s0@csail-slurm": 0.033861,
+        "s1@utcs-lysine": 0.03238137032609759
       },
       "sources": [
-        "transcribed"
+        "transcribed",
+        "file"
       ]
     },
     {
@@ -375,14 +377,16 @@
         0.1183,
         0.8315
       ],
-      "n": 1,
-      "mind_mean": 0.03523885465189775,
-      "mind_sd": null,
+      "n": 2,
+      "mind_mean": 0.0349041326160109,
+      "mind_sd": 0.0004733684427763243,
       "mind_by_run": {
-        "s0@csail-slurm": 0.03523885465189775
+        "s0@csail-slurm": 0.03523885465189775,
+        "s1@utcs-lysine": 0.03456941058012404
       },
       "sources": [
-        "transcribed"
+        "transcribed",
+        "file"
       ]
     },
     {
