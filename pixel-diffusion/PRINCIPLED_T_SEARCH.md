@@ -5,8 +5,11 @@ Companion to `DYNAMIC_T_SEARCH.md`. That document records the *discrete* search 
 attempt to get the same answer from a single run, by asking the model directly
 where corrupted data stops being distinguishable from clean data.
 
-**Status: runs in flight.** Design, tooling and calibration are complete and are
-recorded below. Results sections are marked TODO until the runs land.
+**Status: headline result in, remaining runs in flight.** The method works
+mechanically — non-invasive, curriculum-independent, warmup-shaped trajectory —
+but the criterion it optimises is not the one that matters: `pr_predvar` lands at
+MIND 0.034158, indistinguishable from a *static* schedule and 5.2 sd worse than
+the best hand-found warmup. See section 7.
 
 ---
 
@@ -338,8 +341,67 @@ final quality. That is the empirical counterpart to the RNG-isolation design
 training batches as a non-probing one), and it is what makes the `gt_*` runs
 usable as ground truth rather than as a perturbed system.
 
-### Everything else
+### The headline: indistinguishability is not the right objective
 
-**TODO** — MIND per run, discovered T trajectories vs the reference, which
+`pr_predvar` — the best-behaved metric, driving T closed-loop — finished at
+**MIND = 0.034158**, against a run-to-run noise floor of 0.00089:
+
+| | MIND | vs pr_predvar |
+|---|---|---|
+| `warmup40` (best discrete) | 0.029537 | **+5.19 sd worse** |
+| `warmup` 0->0.95 | 0.030319 | +4.31 sd worse |
+| `gt_warmup` (same schedule, probed) | 0.031173 | +3.35 sd worse |
+| `ceiling_050` | 0.034655 | -0.56 sd |
+| **`static_T050`** | 0.034904 | **-0.84 sd, indistinguishable** |
+
+This value was **predicted in advance** — 0.0335-0.0350, committed in 729e005
+before the run finished — from the shape disagreement in section 4.2c. It landed
+at 0.034158.
+
+The schedule it chose, against the one that works:
+
+```
+kimg          0    300    600    900   1200   1500   1801
+T applied  0.00   0.28   0.49   0.58   0.61   0.62   0.59
+warmup ref 0.00   0.00   0.06   0.25   0.44   0.63   0.82
+```
+
+Wrong at both ends. Far **too restrictive early** — T=0.49 at kimg 600 where
+warmup is still at 0.06, so it throws away corrupted data the good schedule is
+still using. And **not restrictive enough late** — 0.59 against 0.82, so it keeps
+using corrupted data the good schedule has dropped.
+
+So the conclusion is not "the probe is noisy" or "the threshold was wrong". The
+probe works: it is non-invasive, its reading is curriculum-independent to within
+one grid step, and it produces a monotone warmup-shaped trajectory in the raw
+signal. **The criterion it optimises is simply not the criterion that matters.**
+
+Ambient-o's premise — corrupted data is *safe* above the noise level where it
+becomes indistinguishable from clean — is a statement about safety, and this
+result says it is the wrong objective to *maximise*. With only 500 clean images,
+early training benefits from corrupted data at noise levels where it is plainly
+distinguishable: volume beats purity while the model still knows nothing. The
+probe rejects exactly that data, and pays 5 sd for it.
+
+That is a useful negative result rather than a failed experiment, and the
+pre-registered prediction makes it a strong one. It also says where a principled
+method should look instead: not at whether corrupted data is distinguishable, but
+at whether including it still reduces held-out loss — a marginal-value question,
+not a distinguishability one.
+
+### Cost, confirmed on a finished run
+
+1308 s of probing across 20 probes, against ~34,280 s of training: **3.8%**,
+inside the 5% budget.
+
+### Remaining runs
+
+`pr_skill`, `pr_lossratio`, `gt_static50`, `pr_predvar_nosmooth`, `pr_msegap`.
+
+A second prediction, recorded before the fact: `pr_predvar_nosmooth` (alpha=1.0)
+follows T_raw directly, which is *more* restrictive early than the EMA-smoothed
+version (0.52 vs 0.28 at kimg 300). If "too restrictive early" is really what
+costs `pr_predvar` its 5 sd, the no-smoothing run should come in **worse than
+0.034158**, and the EMA's lag will have been doing useful work the probe was not. — MIND per run, discovered T trajectories vs the reference, which
 metric/rule tracked it, and whether any discovered schedule beats the discrete
 search's best (MIND ≈ 0.0295).
