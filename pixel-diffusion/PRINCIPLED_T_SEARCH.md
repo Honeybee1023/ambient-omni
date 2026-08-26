@@ -471,6 +471,35 @@ construction depends on whether that data is currently being used.
 **+0.40 sd.** With `gt_warmup` at +0.96 sd, non-invasiveness now holds on two
 schedules as different as constant-T and full warmup.
 
+### The EMA was doing the work: a matched pair
+
+`pr_predvar_nosmooth` is `pr_predvar` with one character changed — `alpha` 0.3 ->
+1.0, so T follows the raw probe reading with no smoothing. Same metric, same
+threshold, same probe seed, same everything else.
+
+| | early T (first 25%) | MIND | |
+|---|---|---|---|
+| `pr_predvar`, alpha=0.3 | 0.220 | 0.034158 | |
+| `pr_predvar_nosmooth`, alpha=1.0 | 0.432 | 0.036033 | **+2.11 sd worse** |
+
+Predicted in advance (commit 2d11674) on the strength of the early-phase result,
+and confirmed. This is the controlled version of that finding: everything is held
+fixed except how fast T is allowed to rise early, and letting it rise at the
+probe's own pace costs 2.11 sd.
+
+So the smoother was not a cosmetic detail — **its lag was the only thing keeping
+`pr_predvar` out of the static-T band.** Section 4.3 worried that the EMA might
+manufacture a warmup ramp and steal credit from the probe; the truth is worse for
+the method than that. The EMA was contributing the one property that helps
+(permissiveness early), and the probe was contributing the property that hurts.
+
+With ten schedules now measured:
+
+```
+r(T over first 25%, MIND) = +0.762
+r(T over last  25%, MIND) = +0.014      late T spans 0.50-0.95 and MIND does not care
+```
+
 ### Cost, confirmed on a finished run
 
 1308 s of probing across 20 probes, against ~34,280 s of training: **3.8%**,
