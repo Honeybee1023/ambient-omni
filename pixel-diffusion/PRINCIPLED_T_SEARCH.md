@@ -185,6 +185,29 @@ Thresholds were chosen to cut where each curve is steepest, and deliberately
 land the four closed-loop runs at different T levels (~0.5, ~0.7, ~0.9, ~0.9) so
 the batch also sweeps the level axis.
 
+### 4.3 The smoothing can manufacture the result — read T_raw, not T_smoothed
+
+The controller applies an EMA over probes (`alpha=0.3`) because a raw per-probe T
+is quantised to the grid and jumps. That smoother is also capable of inventing
+the headline finding. Feed it the step function the calibration predicts —
+untrained model reads 0, every subsequent probe reads 0.55 — and it emits:
+
+```
+T_raw       0.00 0.55 0.55 0.55 0.55 0.55 0.55 0.55 0.55 0.55 ...
+T_smoothed  0.00 0.17 0.28 0.36 0.42 0.46 0.49 0.50 0.52 0.53 ...
+```
+
+reaching 95% of its final value at ~900 kimg. Plotted, that is a textbook warmup
+ramp. It contains no discovery whatsoever.
+
+So: **the claim "the model discovered a warmup schedule" can only rest on
+`T_raw`.** Every probe logs both, and `analyze_probe.py` prints both, precisely
+so this cannot be glossed over. If `T_raw` turns out to be a step and
+`T_smoothed` a ramp, the honest framing is that *the probe supplies the ceiling
+and the EMA supplies the ramp* — a real but much weaker contribution, and the
+`pr_skill_nosmooth` ablation (`alpha=1.0`) becomes the run that matters rather
+than a nice-to-have.
+
 ## 5. Runs
 
 Dataset `celeba_dynamic_t_v2` (500 clean b0 + 26,014 blurred b5, σ_blur=0.5),
