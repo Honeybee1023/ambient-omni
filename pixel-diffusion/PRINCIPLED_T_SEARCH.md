@@ -428,6 +428,49 @@ Caveat: n=6 and the points are not independent, so treat +0.785 as direction and
 mechanism rather than a calibrated effect size. The ordering and the `warmup40`
 counterexample carry the argument, not the coefficient.
 
+### The probe is a clock, not a controller
+
+Three models trained under radically different data regimes — warmup (T=0 for the
+first 500 kimg, rising to 0.95), static T=0.50, and the probe's own closed loop —
+were probed with the identical instrument. Recomputed at `pred_var/fixed/1.10`:
+
+```
+kimg                          0    300    600    900   1200   1500
+gt_warmup   (0 -> 0.95)    0.00   0.52   0.57   0.62   0.62   0.67
+gt_static50 (0.50 flat)    0.00   0.57   0.62   0.62   0.62   0.62
+pr_predvar  (closed loop)  0.00   0.52   0.62   0.62   0.62   0.57
+
+pairwise mean |difference| = 0.019 - 0.028   (grid spacing is 0.05)
+```
+
+Every pair agrees to within **half a grid step**. That is a genuine robustness
+property — the reading is a stable function of the model, not an artifact of the
+curriculum — and it is also the deepest reason the method cannot work as posed.
+
+**A control signal that does not respond to the control action cannot close a
+useful loop.** The probe returns very nearly the same trajectory no matter what
+data the model was fed, so it carries almost no information about whether the
+*current* schedule is appropriate. It measures how far training has progressed,
+not what data is safe given this model. It is a clock.
+
+That reframes the negative result usefully. The failure is not a bad metric or a
+bad threshold — `pred_var` is well-behaved, nuisance-free and reproducible. It is
+that clean-vs-corrupt distinguishability is nearly independent of the training
+schedule, so no threshold on it can steer that schedule. Anything genuinely
+adaptive has to measure a quantity that *moves when the schedule moves* — e.g.
+the marginal effect of including corrupted data on held-out loss, which by
+construction depends on whether that data is currently being used.
+
+### Control 2: probing is non-invasive on a second schedule
+
+| | MIND | n |
+|---|---|---|
+| `gt_static50` (probe attached) | 0.035261 | 1 |
+| `static_T050` (no probe) | 0.034904 | 1 |
+
+**+0.40 sd.** With `gt_warmup` at +0.96 sd, non-invasiveness now holds on two
+schedules as different as constant-T and full warmup.
+
 ### Cost, confirmed on a finished run
 
 1308 s of probing across 20 probes, against ~34,280 s of training: **3.8%**,
