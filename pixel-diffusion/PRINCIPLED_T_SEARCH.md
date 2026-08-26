@@ -217,6 +217,46 @@ It also means any future version should probe **densely over the first ~500
 kimg** rather than uniformly: at 100-kimg spacing only three probes land inside
 the part of the run where anything moves.
 
+### 4.2c The probe reads the model, not the curriculum — and it disagrees with what works
+
+`gt_warmup` (open loop, trained under warmup 0->0.95) and `pr_predvar` (closed
+loop, driven by its own probe) give almost the same raw reading, though the two
+models saw very different data:
+
+```
+kimg              0   100   200   300   400   500   600   700   800  ...  1500
+gt_warmup      0.00  0.12  0.47  0.52  0.57  0.57  0.57  0.57  0.57       0.67
+pr_predvar     0.00  0.17  0.47  0.52  0.57  0.57  0.62  0.62  0.62
+warmup sched   0.00  0.00  0.00  0.00  0.00  0.00  0.06  0.13  0.19       0.63
+```
+
+mean |gt_warmup - pr_predvar| = **0.022** over the overlap, about one grid step.
+Two things follow.
+
+**The reading is a property of the model's competence, not of the schedule that
+produced it.** That is the robustness the `gt_static50` control was added to
+test, and it already holds across two curricula that differ enormously early on
+(one holds T=0 for 500 kimg, the other is at T=0.37 by kimg 400).
+
+**There is therefore no feedback amplification.** The closed loop neither runs
+away nor reinforces itself; it tracks the same curve the open loop does. Any
+ramp in the applied schedule is the probe's own reading plus the EMA, not a
+loop effect.
+
+**And the probe disagrees with the schedule that actually wins.** Higher T means
+*less* corrupt data. The probe wants T~0.57 by kimg 400; the best known schedule
+holds T=0 — maximally permissive — until kimg 500 and only tightens later. They
+converge only near the end. So the criterion "use corrupted data only where it is
+indistinguishable from clean" is **not** the same criterion as "use corrupted
+data where it helps": early in training the model appears to need data *volume*
+more than data *purity*, and 500 clean images is not enough on its own. The
+probe rejects exactly the data the discrete search says to use.
+
+That yields a falsifiable prediction, recorded before the run finished: because
+`pr_predvar` restricts early where warmup does not, its MIND should land nearer
+the static-T band (~0.0335-0.0350, cf. `static_T050` = 0.034904) than the warmup
+plateau (~0.0295). **TODO: check against the measured value.**
+
 ### 4.3 The smoothing can manufacture the result — read T_raw, not T_smoothed
 
 The controller applies an EMA over probes (`alpha=0.3`) because a raw per-probe T
