@@ -172,6 +172,21 @@ RUNS = [
 # would train a model at a constant T and tell us nothing.
 ABLATIONS = [
     {
+        # Promoted out of the ablation set once gt_warmup showed T_raw genuinely
+        # ramps (0 -> 0.57 over the first 400 kimg). The controller's EMA holds
+        # the APPLIED T well below the raw reading early on -- 0.05 vs 0.17 at
+        # kimg 100, 0.56 vs 0.62 at kimg 800 -- which happens to drag the applied
+        # schedule toward the permissive-early shape the discrete search says
+        # wins. So this run follows T_raw directly and asks whether the EMA's lag
+        # is doing the useful work rather than the probe.
+        "name": "pr_predvar_nosmooth",
+        "note": "as pr_predvar with alpha=1.0: follow the raw probe reading, no "
+                "EMA. Tests whether the smoother's lag is what helps.",
+        "schedule": {"type": "principled",
+                     "probe": probe(metric="pred_var", rule="fixed",
+                                    threshold=1.10, alpha=1.0)},
+    },
+    {
         "name": "pr_skill_mono",
         "note": "as pr_skill but T forced non-decreasing.",
         "schedule": {"type": "principled",
