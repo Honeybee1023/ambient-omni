@@ -185,6 +185,38 @@ Thresholds were chosen to cut where each curve is steepest, and deliberately
 land the four closed-loop runs at different T levels (~0.5, ~0.7, ~0.9, ~0.9) so
 the batch also sweeps the level axis.
 
+### 4.2b Correction: the boundary DOES ramp — the calibration grid was too coarse
+
+The first live probes of `gt_warmup` overturn part of §4.1. Recomputed with the
+two-sided rules, under the known-good warmup curriculum and at 100-kimg spacing:
+
+```
+kimg                        0     100     200     300
+pred_var/fixed/1.10      0.00    0.12    0.47    0.52
+pred_var/fixed/1.05      0.00    0.38    0.67    0.72
+```
+
+That is a real ramp in the **raw** signal, over three probes — not the step §4.1
+predicted. The two are not in conflict: sobol08's snapshots are 250 kimg apart,
+so its first post-zero sample already sat at the top of the rise (it read 0.52 at
+250 kimg; `gt_warmup` reads 0.52 at 300). The calibration was not wrong about the
+plateau, it simply had no sample inside the climb. Checkpoint spacing, not
+curriculum, is the explanation — the two agree wherever they overlap.
+
+**What survives from §4.1**: the boundary saturates early, by ~300 kimg (15% of
+training), and then sits still for the remaining 85%.
+
+**What this changes**: the probe and the empirically best schedule *disagree
+about shape*. The probe says the model can already tolerate T~0.5 by 300 kimg;
+the best known schedule holds T=0 until 500 kimg and only then ramps, reaching
+0.95 at the end. The probe front-loads what warmup back-loads. Whether that is
+the probe being right and the discrete search's grid too coarse, or the probe
+measuring the wrong thing, is exactly what the closed-loop runs decide.
+
+It also means any future version should probe **densely over the first ~500
+kimg** rather than uniformly: at 100-kimg spacing only three probes land inside
+the part of the run where anything moves.
+
 ### 4.3 The smoothing can manufacture the result — read T_raw, not T_smoothed
 
 The controller applies an EMA over probes (`alpha=0.3`) because a raw per-probe T
