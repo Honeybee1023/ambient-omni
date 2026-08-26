@@ -108,6 +108,15 @@ def compute_scheduled_sigma_min(t_schedule, progress):
     elif stype == 'none':
         # No masking at all (T=0 means sigma_min=0, use full range)
         return 0.0
+    elif stype == 'principled':
+        # T comes from the online probe, not from progress, so there is no pure
+        # function of `progress` to evaluate here. The training loop reads
+        # ProbeController.current_T directly and never calls this branch;
+        # reaching it means the wiring is broken, and silently returning 0.0
+        # would train with all corrupt data at every noise level.
+        raise ValueError(
+            "t_schedule type 'principled' is set by the probe controller, not by "
+            "compute_scheduled_sigma_min. This is a wiring bug.")
     else:
         raise ValueError(f"Unknown t_schedule type: {stype}")
     
@@ -396,12 +405,52 @@ def training_loop(
     tick_batch_seen = 0
     tick_corrupt_frac = float('nan')
 
+    # Online probe. `probe` is an orthogonal key on the schedule dict: it turns
+    # probing on, and `type: principled` separately says to *obey* the result.
+    # Any existing schedule can therefore be probed without being steered by it,
+    # which is what the ground-truth logging runs do -- they follow a schedule we
+    # already know is good and record what the probe would have said.
+    probe_ctrl = None
+    probe_cfg = t_schedule.get('probe') if isinstance(t_schedule, dict) else None
+    if probe_cfg is not None:
+        from training.probe import ProbeController
+        probe_ctrl = ProbeController(probe_cfg, run_dir, device)
+        if probe_ctrl.restore():
+            dist.print0(f'Probe: resumed after {probe_ctrl.n_probes} probes, '
+                        f'T={probe_ctrl.current_T:.3f}, next at {probe_ctrl.next_kimg:.0f} kimg')
+        else:
+            probe_ctrl.next_kimg = cur_nimg / 1000.0
+        dist.print0(f'Probe: every {probe_ctrl.every_kimg:g} kimg, '
+                    f'{probe_ctrl.n_images} images x {probe_ctrl.n_draws} draws x '
+                    f'{probe_ctrl.n_levels} levels, metric={probe_ctrl.metric} '
+                    f'rule={probe_ctrl.rule} alpha={probe_ctrl.alpha} '
+                    f'monotone={probe_ctrl.monotone}')
+    elif isinstance(t_schedule, dict) and t_schedule.get('type') == 'principled':
+        raise ValueError("t_schedule type 'principled' requires a 'probe' config; "
+                         "without it there is nothing to read T from.")
+
     while True:
 
         # Update dynamic T schedule
         if t_schedule is not None and len(corrupt_filenames) > 0:
             progress = cur_nimg / (total_kimg * 1000)
-            current_sigma_min = compute_scheduled_sigma_min(t_schedule, progress)
+
+            if probe_ctrl is not None and probe_ctrl.due(cur_nimg):
+                driving = (t_schedule.get('type') == 'principled')
+                rec = probe_ctrl.step(ema, cur_nimg, total_kimg, apply_to_schedule=driving)
+                dist.print0(
+                    f"Probe {rec['probe_index']:>3d} @ {rec['kimg']:>7.1f} kimg  "
+                    f"T_raw {rec['T_raw']:.3f}  T_smoothed {rec['T_smoothed']:.3f}  "
+                    f"({'driving' if driving else 'logging only'}, "
+                    f"{rec['probe']['probe_seconds']:.1f}s)")
+
+            if t_schedule.get('type') == 'principled':
+                # The probe fills in for the schedule; before the first probe
+                # this is t_init (0.0 by default: all corrupt data eligible).
+                current_sigma_min = compute_scheduled_sigma_min(
+                    {'type': 'static', 't_start': probe_ctrl.current_T}, progress)
+            else:
+                current_sigma_min = compute_scheduled_sigma_min(t_schedule, progress)
             progress_t_value = sigma_min_to_t(current_sigma_min)
             if current_sigma_min != last_scheduled_sigma_min:
                 for fname in corrupt_filenames:
@@ -527,6 +576,13 @@ def training_loop(
         if t_schedule is not None:
             fields += [f"T {progress_t_value:<5.3f}"]
             fields += [f"corrupt {tick_corrupt_frac:<5.3f}"]
+        if probe_ctrl is not None:
+            # Cumulative probe cost as a fraction of wall clock -- the budget the
+            # method has to stay inside to be worth calling cheap.
+            share = probe_ctrl.total_seconds / max(tick_end_time - start_time, 1e-9)
+            fields += [f"probes {probe_ctrl.n_probes:<3d}"]
+            fields += [f"Traw {probe_ctrl.raw_T:<5.3f}"]
+            fields += [f"probe_ovh {100 * share:<4.1f}%"]
         torch.cuda.reset_peak_memory_stats()
         dist.print0(' '.join(fields))
 
