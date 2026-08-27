@@ -187,9 +187,9 @@
       "name": "pr_predvar_hold50",
       "kind": "probe-driven",
       "log": "hold50",
-      "mind": null,
-      "n": 0,
-      "note": "RUNNING"
+      "mind": 0.033263026215824235,
+      "n": 1,
+      "note": "T held at 0 for the first 50%. Refuted the 'suppress the probe early' fix: still 3.3 sd worse than warmup."
     },
     {
       "name": "pr_predvar_s1",

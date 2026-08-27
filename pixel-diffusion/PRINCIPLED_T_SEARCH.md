@@ -581,6 +581,57 @@ selection bias. The model should be read as "T in the second quarter dominates",
 not as a calibrated predictor, and `warmup40`'s residual is not evidence of extra
 structure.
 
+### hold50, and the model that finally holds up
+
+`pr_predvar_hold50` holds T=0 through the first **half** of training. Predicted
+to reach the warmup plateau; it landed at **0.033263**. Full dose-response:
+
+```
+hold  0%  (pr_predvar)   0.034158
+hold 25%                 0.033964
+hold 50%                 0.033263      still 3.3 sd worse than warmup 0->0.95
+```
+
+Suppressing the probe for half the run buys 1.0 sd and does not close a 4 sd gap.
+It also broke the window model: `hold50` has the *lowest* T of any run in the
+"critical" second quarter (0.019 vs warmup's 0.158) and is still 3 sd worse, and
+adding it dropped the window fit from R^2 0.886 to 0.763 with +-5 sd outliers at
+both ends.
+
+Two hypotheses had now failed (first quarter, second quarter), both because they
+were single-window linear stories. Splitting on **two** conditions separates all
+13 runs with no overlap:
+
+| group | MIND range | n |
+|---|---|---|
+| permissive early + high ceiling | 0.029537 - 0.031173 | 3 |
+| permissive early + low ceiling | 0.033263 - 0.033964 | 2 |
+| restrictive early + low ceiling | 0.034158 - 0.036033 | 4 |
+| restrictive early + high ceiling | 0.038194 - 0.043754 | 4 |
+
+(permissive early = mean T over the first half < 0.25; high ceiling = max T over
+the last quarter >= 0.75. Separation survives ceiling in [0.70, 0.80] and early
+in [0.25, 0.30].)
+
+**The two effects interact, which is why every linear model failed.** A high
+ceiling helps only alongside permissive early training. Paired with restrictive
+early training it is the **worst** configuration measured — worse than being
+restrictive throughout. That makes sense mechanically: restrict early and also
+withdraw the corrupted data late and the model never really trains on it, leaving
+500 clean images and 4000 epochs of overfitting. Warmup works because it takes
+the volume first and only then buys purity.
+
+This finally explains the probe cleanly. Its plateau is ~0.6 — a **low ceiling** —
+and its reading rises early — **restrictive early**. It lands in the second-worst
+quadrant by construction, and no amount of holding fixes it, because holding only
+moves the early term while the ceiling is set by where the probe's reading
+saturates. To put a probe-driven run in the good quadrant you would have to delay
+it *and* raise its ceiling, i.e. specify the schedule yourself.
+
+**Caveat.** Thresholds chosen post hoc, n=13, groups of 2-4. This is structure
+worth testing, not an established law; `analyze_schedule_effect.py` reproduces it
+from the committed traces so it can be rechecked as runs are added.
+
 ### Cost, confirmed on a finished run
 
 1308 s of probing across 20 probes, against ~34,280 s of training: **3.8%**,

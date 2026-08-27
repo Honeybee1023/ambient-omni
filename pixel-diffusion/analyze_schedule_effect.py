@@ -141,6 +141,42 @@ def main():
         flag = "  <-- outlier" if abs(m - p) / NOISE_SD > 3 else ""
         print(f"{n:<22} {m:>9.6f} {p:>9.6f} {(m-p)/NOISE_SD:>+9.2f} sd{flag}")
 
+    # --- the analysis that actually survived -------------------------------
+    # Linear models on T-in-a-window fit badly (R^2 ~ 0.78 with +-5 sd outliers
+    # at both ends) because the two effects INTERACT rather than add. Splitting
+    # on both conditions separates every run cleanly instead.
+    print("\n" + "=" * 76)
+    print("Two conditions, and they interact")
+    print("=" * 76)
+    E_THR, C_THR = 0.25, 0.75
+    g = {}
+    for n, c, m, _ in rows:
+        e = window_mean(c, 0, .5)
+        ceil = float(c[int(.75 * (GRID - 1)):].max())
+        key = ("permissive early" if e < E_THR else "restrictive early",
+               "high ceiling" if ceil >= C_THR else "low ceiling")
+        g.setdefault(key, []).append((n, m, e, ceil))
+    order = [("permissive early", "high ceiling"), ("permissive early", "low ceiling"),
+             ("restrictive early", "low ceiling"), ("restrictive early", "high ceiling")]
+    prev_max = None
+    for k in order:
+        v = sorted(g.get(k, []), key=lambda z: z[1])
+        if not v:
+            continue
+        ms = [x[1] for x in v]
+        sep = "" if prev_max is None else ("   SEPARATED" if prev_max < min(ms) else "   OVERLAP")
+        print(f"\n{k[0]} + {k[1]}:  {min(ms):.6f} - {max(ms):.6f}  (n={len(ms)}){sep}")
+        for n, m, e, ceil in v:
+            print(f"    {n:<24} early {e:.3f}  ceiling {ceil:.3f}   {m:.6f}")
+        prev_max = max(ms)
+    print("\nA high ceiling helps ONLY alongside permissive early training. Paired with")
+    print("restrictive early training it is the worst configuration measured -- worse")
+    print("than being restrictive throughout. Withdrawing corrupted data late only pays")
+    print("if the model got the volume early.")
+    print("\nThresholds were chosen post hoc; the separation survives ceiling in")
+    print("[0.70, 0.80] and early in [0.25, 0.30], but n=13 with groups of 2-4, so this")
+    print("is structure worth testing, not an established law.")
+
     print("\nRead the fit as 'T in the second quarter dominates', not as a calibrated")
     print("predictor. The best schedule is the argmin of a 30-run search, so it is the")
     print("point most likely to be an optimistic draw; its residual is not evidence of")
