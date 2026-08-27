@@ -500,6 +500,40 @@ r(T over first 25%, MIND) = +0.762
 r(T over last  25%, MIND) = +0.014      late T spans 0.50-0.95 and MIND does not care
 ```
 
+### `pr_msegap`: the prediction held
+
+Queued last and at the only non-degenerate threshold found, `mse_gap/baseline/16`
+finished at **0.043754** — the worst of all 40 runs in both studies. Its applied T
+sat at 0.82-0.87 from the very first probe (early T = 0.843, the most restrictive
+schedule measured), which is precisely what the offline calibration said it would
+do. The metric is unusable, and now measured rather than only predicted.
+
+### Full ordering, all ten measured schedules
+
+| schedule | early T | late T | MIND |
+|---|---|---|---|
+| `warmup40` (best discrete) | 0.079 | 0.950 | 0.029537 |
+| warmup 0->0.95 | 0.000 | 0.792 | 0.030319 |
+| `gt_warmup` (probed) | 0.000 | 0.792 | 0.031173 |
+| `pr_predvar` | 0.220 | 0.596 | 0.034158 |
+| `static_T050` | 0.500 | 0.500 | 0.034904 |
+| `gt_static50` (probed) | 0.500 | 0.500 | 0.035261 |
+| `pr_predvar_nosmooth` | 0.432 | 0.530 | 0.036033 |
+| `early_steep` | 0.299 | 0.850 | 0.038194 |
+| `pr_lossratio` | 0.480 | 0.876 | 0.042591 |
+| `pr_skill` | 0.462 | 0.783 | 0.042679 |
+| `pr_msegap` | 0.843 | 0.831 | 0.043754 |
+
+Every probe-driven run sits below every hand-designed warmup, and the ordering is
+early-T ordering.
+
+### Replication
+
+Every principled run is n=1, while the discrete baselines it is being compared
+against are n=2. That is exactly the unequal-n comparison this project has been
+burned by before (see `DYNAMIC_T_SEARCH.md`), so a seed-1 replicate of
+`pr_predvar` — the headline number — is running. **TODO: fold in.**
+
 ### Cost, confirmed on a finished run
 
 1308 s of probing across 20 probes, against ~34,280 s of training: **3.8%**,
