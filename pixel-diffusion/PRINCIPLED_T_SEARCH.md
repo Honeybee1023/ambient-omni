@@ -534,6 +534,53 @@ against are n=2. That is exactly the unequal-n comparison this project has been
 burned by before (see `DYNAMIC_T_SEARCH.md`), so a seed-1 replicate of
 `pr_predvar` — the headline number — is running. **TODO: fold in.**
 
+### CORRECTION: the critical window is the SECOND quarter, not the first
+
+`pr_predvar_hold25` holds T=0 through the first 25% of training and then obeys
+the probe. Predicted (from the n=7 early-phase result) to reach the warmup
+plateau, ~0.0295-0.0315. **It landed at 0.033964** — 0.22 sd from plain
+`pr_predvar` (0.034158). Holding the entire first quarter bought nothing. The
+prediction is refuted and the "only the first quarter matters" claim with it.
+
+Scanning windows over all 12 measured schedules:
+
+```
+window of training      r(mean T in window, MIND)
+[0.00, 0.10]                   +0.617
+[0.00, 0.25]                   +0.812     <- the earlier claim
+[0.00, 0.50]                   +0.909
+[0.10, 0.40]                   +0.916
+[0.25, 0.50]                   +0.939     <- strongest
+[0.50, 0.75]                   +0.728
+[0.75, 1.00]                   +0.141
+```
+
+The controlling variable is T over the **second quarter**. A two-predictor fit
+confirms the late phase is inert:
+
+```
+MIND ~ 0.02456 + 0.01908 * T[.25,.50] + 0.00192 * T[.75,1]
+       R^2 = 0.886        (T[.25,.50] alone: 0.882)
+       +2.1 sd per +0.1 of T in the second quarter
+       +0.2 sd per +0.1 of T in the last quarter
+```
+
+That explains `hold25` cleanly. It protected the first quarter, but the EMA then
+ramped hard and put T at 0.396 across [.25,.50] — close to `pr_predvar`'s 0.534
+and far above warmup's 0.158. It defended the wrong window.
+
+And it sharpens the verdict on the method. To match warmup, the probe's output
+would have to be suppressed through the **first half** of training — by which
+point the schedule is warmup, and the probe is contributing nothing but a
+ceiling that the last-quarter coefficient says barely matters.
+
+**Caveat, stated rather than buried:** `warmup40` sits 4.1 sd *better* than this
+model predicts. It is also the argmin of a 30-run search, so it is precisely the
+point most likely to be an optimistic draw; n=2 helps but does not remove
+selection bias. The model should be read as "T in the second quarter dominates",
+not as a calibrated predictor, and `warmup40`'s residual is not evidence of extra
+structure.
+
 ### Cost, confirmed on a finished run
 
 1308 s of probing across 20 probes, against ~34,280 s of training: **3.8%**,
