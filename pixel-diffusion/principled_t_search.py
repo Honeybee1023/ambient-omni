@@ -221,6 +221,25 @@ ABLATIONS = [
                                     threshold=1.10, hold_until=0.50)},
     },
     {
+        # Falsification test for the two-condition interaction (section 7).
+        # That model says the only good quadrant is "permissive early + high
+        # ceiling", and all three runs currently in it are warmup variants -- so
+        # the grouping might just be relabelling "is it a warmup". This is a
+        # DIFFERENT shape in the same quadrant: flat at T=0 for the whole first
+        # half, then a single steep ramp to 0.95. Early mean 0.0, ceiling 0.95.
+        #
+        # Predicted 0.0295-0.0312. If it lands near 0.033 instead, the quadrant
+        # story is wrong and what matters is the specific warmup shape.
+        # The probe rides along (logging only) so this also adds a fourth
+        # curriculum to the invariance check.
+        "name": "sched_hold50_ceil95",
+        "note": "T=0 for the first half, then a steep ramp to 0.95. Tests whether "
+                "the good quadrant generalises beyond warmup shapes.",
+        "schedule": {"type": "piecewise",
+                     "control_points": [[0.0, 0.0], [0.5, 0.0], [1.0, 0.95]],
+                     "probe": probe()},
+    },
+    {
         "name": "pr_skill_mono",
         "note": "as pr_skill but T forced non-decreasing.",
         "schedule": {"type": "principled",

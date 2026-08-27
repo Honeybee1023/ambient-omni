@@ -106,9 +106,13 @@
       "name": "pr_predvar",
       "kind": "probe-driven",
       "log": "pr_predvar",
-      "mind": 0.034158,
-      "n": 1,
-      "note": "headline run; MIND predicted in advance to fall in 0.0335-0.0350"
+      "mind": 0.034917,
+      "n": 2,
+      "note": "headline run, n=2. Predicted in advance to fall in 0.0335-0.0350. Pooled static (n=2) is 0.035083, i.e. -0.19 sd -- indistinguishable.",
+      "mind_by_seed": {
+        "s0": 0.034158,
+        "s1": 0.035676
+      }
     },
     {
       "name": "static_T050",
@@ -197,7 +201,7 @@
       "log": "pr_predvar_s1",
       "mind": null,
       "n": 0,
-      "note": "RUNNING: seed-1 replicate of the headline run"
+      "note": "folded into pr_predvar as seed 1"
     }
   ]
 }
