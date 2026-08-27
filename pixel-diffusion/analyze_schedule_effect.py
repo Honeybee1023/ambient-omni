@@ -13,7 +13,7 @@ rather than asserted.
 
 Reads:
   results/principled_runs.json      MIND per run + how its T curve is defined
-  results/probe_logs/<run>.jsonl.gz the probe log, for runs whose T was driven
+  results/probe_traces/<run>.jsonl.gz the probe log, for runs whose T was driven
                                     or smoothed and so is not a closed form
 
 Usage:
@@ -30,7 +30,7 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.path.join(HERE, "results", "principled_runs.json")
-LOGS = os.path.join(HERE, "results", "probe_logs")
+LOGS = os.path.join(HERE, "results", "probe_traces")
 
 # Run-to-run spread of MIND for one configuration, measured over 8 replicate
 # pairs in the discrete study. Everything here is quoted against it.
