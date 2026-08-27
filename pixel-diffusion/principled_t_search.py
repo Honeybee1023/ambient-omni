@@ -205,6 +205,22 @@ ABLATIONS = [
                                     threshold=1.10, alpha=1.0)},
     },
     {
+        # hold25 landed at 0.033964, no better than no hold at all, because the
+        # EMA ramped straight past the window that matters: T over [.25,.50]
+        # predicts MIND with r=+0.939 while T over [0,.25] gives +0.812 and the
+        # last quarter +0.141. hold25 defended the wrong quarter.
+        #
+        # hold50 pins the dose-response: hold 0% -> 0.034158, hold 25% ->
+        # 0.033964, hold 50% -> ? If this reaches the warmup plateau it says
+        # exactly how much of the run the probe must be prevented from steering,
+        # and by then the schedule IS warmup and the probe adds only a ceiling.
+        "name": "pr_predvar_hold50",
+        "note": "pred_var probe, T held at 0 for the first 50% of training.",
+        "schedule": {"type": "principled",
+                     "probe": probe(metric="pred_var", rule="fixed",
+                                    threshold=1.10, hold_until=0.50)},
+    },
+    {
         "name": "pr_skill_mono",
         "note": "as pr_skill but T forced non-decreasing.",
         "schedule": {"type": "principled",

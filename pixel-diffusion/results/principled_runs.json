@@ -1,0 +1,203 @@
+{
+  "study": "principled dynamic-T (online probe)",
+  "objective": "MIND (Sliced Wasserstein on Inception-v3 features), lower is better",
+  "noise_sd": 0.00089,
+  "noise_sd_note": "run-to-run spread of one configuration, from 8 replicate pairs in the discrete study",
+  "dataset": "celeba_dynamic_t_v2 b0+b5 variant, 500 clean + 26014 blurred (sigma_blur=0.5), 26514 annotations",
+  "training": "2000 kimg, batch 64, ddpmpp, seed 0",
+  "probe": "160 holdout images x 2 noise draws x 20 T levels, every 100 kimg; see training/probe.py",
+  "curve_note": "knots = piecewise-linear control points over training fraction; constant = static T; log = applied T read from the committed probe log (null T_applied means the hold was in force and the run trained at T=0)",
+  "runs": [
+    {
+      "name": "warmup40",
+      "kind": "discrete",
+      "knots": [
+        [
+          0,
+          0
+        ],
+        [
+          0.25,
+          0.158
+        ],
+        [
+          0.5,
+          0.554
+        ],
+        [
+          0.75,
+          0.95
+        ],
+        [
+          1,
+          0.95
+        ]
+      ],
+      "mind": 0.029537,
+      "n": 2,
+      "note": "best of the 30-run discrete search; argmin, so optimistically biased"
+    },
+    {
+      "name": "warmup_0to095",
+      "kind": "discrete",
+      "knots": [
+        [
+          0,
+          0
+        ],
+        [
+          0.25,
+          0
+        ],
+        [
+          0.5,
+          0.31667
+        ],
+        [
+          0.75,
+          0.63333
+        ],
+        [
+          1,
+          0.95
+        ]
+      ],
+      "mind": 0.030319,
+      "n": 2
+    },
+    {
+      "name": "gt_warmup",
+      "kind": "probe-logging",
+      "knots": [
+        [
+          0,
+          0
+        ],
+        [
+          0.25,
+          0
+        ],
+        [
+          0.5,
+          0.31667
+        ],
+        [
+          0.75,
+          0.63333
+        ],
+        [
+          1,
+          0.95
+        ]
+      ],
+      "mind": 0.031173,
+      "n": 1,
+      "note": "same schedule as warmup_0to095 with the probe attached but not steering; +0.96 sd apart, so probing is non-invasive"
+    },
+    {
+      "name": "pr_predvar_hold25",
+      "kind": "probe-driven",
+      "log": "hold25",
+      "mind": 0.033964,
+      "n": 1,
+      "note": "T held at 0 for the first 25%, then probe-driven. Refuted the first-quarter hypothesis."
+    },
+    {
+      "name": "pr_predvar",
+      "kind": "probe-driven",
+      "log": "pr_predvar",
+      "mind": 0.034158,
+      "n": 1,
+      "note": "headline run; MIND predicted in advance to fall in 0.0335-0.0350"
+    },
+    {
+      "name": "static_T050",
+      "kind": "discrete",
+      "constant": 0.5,
+      "mind": 0.034904,
+      "n": 1
+    },
+    {
+      "name": "gt_static50",
+      "kind": "probe-logging",
+      "constant": 0.5,
+      "mind": 0.035261,
+      "n": 1,
+      "note": "probe attached, not steering; +0.40 sd from static_T050"
+    },
+    {
+      "name": "pr_predvar_nosmooth",
+      "kind": "probe-driven",
+      "log": "pr_nosmooth",
+      "mind": 0.036033,
+      "n": 1,
+      "note": "identical to pr_predvar except alpha 0.3 -> 1.0; +2.11 sd worse, isolating the smoother"
+    },
+    {
+      "name": "early_steep",
+      "kind": "discrete",
+      "knots": [
+        [
+          0,
+          0
+        ],
+        [
+          0.25,
+          0.6
+        ],
+        [
+          0.5,
+          0.7
+        ],
+        [
+          0.75,
+          0.8
+        ],
+        [
+          1,
+          0.9
+        ]
+      ],
+      "mind": 0.038194,
+      "n": 1
+    },
+    {
+      "name": "pr_lossratio",
+      "kind": "probe-driven",
+      "log": "pr_lossratio",
+      "mind": 0.042591,
+      "n": 1
+    },
+    {
+      "name": "pr_skill",
+      "kind": "probe-driven",
+      "log": "pr_skill",
+      "mind": 0.042679,
+      "n": 1
+    },
+    {
+      "name": "pr_msegap",
+      "kind": "probe-driven",
+      "log": "pr_msegap",
+      "mind": 0.043754,
+      "n": 1,
+      "note": "worst of all 40 runs; calibration predicted it would be degenerate"
+    },
+    {
+      "name": "pr_predvar_hold50",
+      "kind": "probe-driven",
+      "log": "hold50",
+      "mind": null,
+      "n": 0,
+      "note": "RUNNING"
+    },
+    {
+      "name": "pr_predvar_s1",
+      "kind": "probe-driven",
+      "log": "pr_predvar_s1",
+      "mind": null,
+      "n": 0,
+      "note": "RUNNING: seed-1 replicate of the headline run"
+    }
+  ]
+}
