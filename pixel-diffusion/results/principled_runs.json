@@ -202,6 +202,31 @@
       "mind": null,
       "n": 0,
       "note": "folded into pr_predvar as seed 1"
+    },
+    {
+      "name": "sched_hold50_ceil95",
+      "kind": "schedule-only",
+      "knots": [
+        [
+          0,
+          0
+        ],
+        [
+          0.5,
+          0
+        ],
+        [
+          1,
+          0.95
+        ]
+      ],
+      "mind": 0.02963680918682329,
+      "n": 2,
+      "note": "Out-of-sample test of the two-condition model: a NON-warmup shape in the 'permissive early + high ceiling' quadrant. Predicted 0.0295-0.0312 before running; landed 0.029637 (n=2), statistically identical to warmup40, the argmin of the 30-run discrete search. Two knots, no probe, no search.",
+      "mind_by_seed": {
+        "s0": 0.02936925430260871,
+        "s1": 0.02990436407103787
+      }
     }
   ]
 }

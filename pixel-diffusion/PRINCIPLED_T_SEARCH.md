@@ -5,7 +5,7 @@ Companion to `DYNAMIC_T_SEARCH.md`. That document records the *discrete* search 
 attempt to get the same answer from a single run, by asking the model directly
 where corrupted data stops being distinguishable from clean data.
 
-**Status: headline result in, remaining runs in flight.** The method works
+**Status: complete.** The method works
 mechanically — non-invasive, curriculum-independent, warmup-shaped trajectory —
 but the criterion it optimises is not the one that matters: `pr_predvar` lands at
 MIND 0.034158, indistinguishable from a *static* schedule and 5.2 sd worse than
@@ -631,6 +631,44 @@ it *and* raise its ceiling, i.e. specify the schedule yourself.
 **Caveat.** Thresholds chosen post hoc, n=13, groups of 2-4. This is structure
 worth testing, not an established law; `analyze_schedule_effect.py` reproduces it
 from the committed traces so it can be rechecked as runs are added.
+
+### The interaction model survives an out-of-sample test
+
+The four-quadrant split was fitted post hoc, and every run in its good quadrant
+was a warmup variant — so it might only have been relabelling "is it a warmup".
+`sched_hold50_ceil95` was written to break that: a deliberately non-warmup shape
+in the same quadrant, **T=0 for the entire first half, then one steep ramp to
+0.95**. Two knots. No probe steering, no search.
+
+Predicted 0.0295-0.0312 **before running**. Result:
+
+| | MIND | n |
+|---|---|---|
+| `sched_hold50_ceil95` | **0.029637** | 2 (0.029369, 0.029904) |
+| `warmup40` (argmin of the 30-run search) | 0.029537 | 2 |
+| `pr_predvar` (probe-driven) | 0.034917 | 2 |
+
+**+0.11 sd from `warmup40` — statistically identical**, on a tight pair (spread
+0.60 noise sd). The quadrant is real and shape-independent, and the prediction
+was genuinely out of sample.
+
+The practical statement is short:
+
+> Use all corrupted data for the first half of training, then withdraw it
+> steeply so it is near-ineligible by the end.
+
+That two-knot schedule matches the winner of a 30-run Bayesian-optimised search.
+It is also a schedule that search could not have found: its 5-knot grid at
+[0, .25, .5, .75, 1] cannot express "flat zero through .5, then a single steep
+ramp" without spending knots on the flat.
+
+So the batch ends with the method rejected and something more useful in its
+place. The probe was never the mechanism -- the shape was.
+
+**Still caveats.** Quadrant thresholds were chosen post hoc and the good group is
+n=4 runs / 3 distinct schedules. This test raises confidence because it was a
+prediction rather than a fit, but "permissive early + high ceiling" is a
+hypothesis with one successful out-of-sample test, not an established law.
 
 ### Cost, confirmed on a finished run
 
