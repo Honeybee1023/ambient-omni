@@ -59,6 +59,7 @@ def parse_int_list(s):
 @click.option('--cbase',         help='Channel multiplier  [default: varies]', metavar='INT',       type=int)
 @click.option('--cres',          help='Channels per resolution  [default: varies]', metavar='LIST', type=parse_int_list)
 @click.option('--lr',            help='Learning rate', metavar='FLOAT',                             type=click.FloatRange(min=0, min_open=True), default=10e-4, show_default=True)
+@click.option('--lr_rampup_kimg', help='Linear LR warmup length in kimg (training_loop default 10000)', metavar='KIMG', type=click.FloatRange(min=0), default=10000, show_default=True)
 @click.option('--weight_decay',  help='Weight decay', metavar='FLOAT',                              type=click.FloatRange(min=0, min_open=False), default=0.0, show_default=True)
 @click.option('--optimizer_name',  help='Optimizer name', metavar='adam|soap', type=click.Choice(['adam', 'soap']), default='adam', show_default=True)
 @click.option('--ema',           help='EMA half-life', metavar='MIMG',                              type=click.FloatRange(min=0), default=0.5, show_default=True)
@@ -131,6 +132,7 @@ def main(**kwargs):
     c.overwrite_cls_labels_path = opts.overwrite_cls_labels_path
     c.crop_size = opts.crop_size
     c.t_schedule = json.loads(opts.t_schedule) if opts.t_schedule else None
+    c.lr_rampup_kimg = opts.lr_rampup_kimg
     c.dataset_kwargs = dnnlib.EasyDict(path=opts.data, use_labels=opts.cond, 
                                        cache=opts.cache,
                                        corruptions_dict=corruptions_dict,

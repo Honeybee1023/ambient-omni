@@ -34,10 +34,10 @@ PY=python
 # lysine's b0+b5 build is celeba_dynamic_t_v2_b0b5; proline's is celeba_dynamic_t_v2.
 SRC="${CLS_SRC:-$( [ -d "${AMBIENT_BASE}/annotated_datasets/celeba_dynamic_t_v2_b0b5" ] && echo celeba_dynamic_t_v2_b0b5 || echo celeba_dynamic_t_v2 )}"
 CLS_DATA="${AMBIENT_BASE}/annotated_datasets/celeba_cls_b0b5"
-CLS_OUT="${AMBIENT_BASE}/train_outputs/cls_b0b5"
-CLS_KIMG=${CLS_KIMG:-200}
+CLS_OUT="${AMBIENT_BASE}/train_outputs/cls_b0b5_v2"
+CLS_KIMG=${CLS_KIMG:-400}
 CKPT="${CLS_OUT}/network-snapshot-$(printf '%06d' "$CLS_KIMG").pkl"
-ANN_OUT="${AMBIENT_BASE}/annotated_datasets/celeba_amb_perimage"
+ANN_OUT="${AMBIENT_BASE}/annotated_datasets/celeba_amb_perimage_v2"
 
 echo "=== classifier pipeline | GPU $GPU_ID | src $SRC | $(date) ==="
 
@@ -59,8 +59,21 @@ if [ ! -f "$CKPT" ]; then
         --precond=edmcls --overwrite_cls_labels_path="${CLS_DATA}/cls_labels.jsonl" \
         --cond=0 --arch=ddpmpp --batch=64 --tick=10 --snap=5 --dump=5 \
         --corruption_probability=0.0 --noise_config=identity --s_max=4 \
+        --lr=1e-3 --lr_rampup_kimg=20 \
         --cache=False --duration=$(awk "BEGIN{print $CLS_KIMG/1000}") --seed=0 --workers=8
     [ -f "$CKPT" ] || { echo "ERROR: no classifier checkpoint at $CKPT"; ls "$CLS_OUT"; exit 1; }
+fi
+
+# Refuse to annotate with a classifier that never learned. Chance for binary
+# cross-entropy is ln 2 = 0.693; the first attempt ended at 0.678 (the LR ramp
+# had it training at 2e-5) and produced thresholds that were pure noise.
+FINAL_LOSS=$($PY -c "
+import json
+L=[json.loads(l) for l in open('${CLS_OUT}/stats.jsonl')]
+print(sum(r['Loss/loss']['mean'] for r in L[-5:])/5)")
+echo "    classifier final loss (mean of last 5 ticks): $FINAL_LOSS   (chance = 0.693)"
+if $PY -c "import sys; sys.exit(0 if float('$FINAL_LOSS') < 0.45 else 1)"; then :; else
+    echo "ERROR: classifier loss $FINAL_LOSS is too close to chance; not annotating."; exit 1
 fi
 
 # --- 3. annotate + summarise ----------------------------------------------
@@ -69,7 +82,7 @@ if [ ! -f "${ANN_OUT}/threshold_summary.json" ]; then
     $PY analysis/annotate_precorrupted.py \
         --checkpoint_path "$CKPT" \
         --dataset_path "${AMBIENT_BASE}/annotated_datasets/${SRC}" \
-        --out "$ANN_OUT" --num_sigmas ${NUM_SIGMAS:-128} --num_trials_per_t 4 || exit 1
+        --out "$ANN_OUT" --num_sigmas ${NUM_SIGMAS:-64} --num_trials_per_t 4 || exit 1
 fi
 
 echo "=== DONE classifier pipeline | $(date) ==="
