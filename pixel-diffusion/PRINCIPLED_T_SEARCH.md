@@ -697,7 +697,8 @@ Three findings:
    Every stronger blur is learned in minutes; σ=0.5 is not learned at all --
    not under the standard training noise, and not when the noise is shifted so
    the cue sits inside most samples (600 kimg, still at chance). A σ=1
-   detector applied to our σ=0.5 files calls 97% of them *clean* (p≈0.04). So
+   detector applied to our σ=0.5 files calls 97% of them *clean* (p≈0.04), and
+   a σ=1.5 detector gives the same verdict (median T 0.027, all 26,014 files). So
    the annotator assigns our bucket T≈0 whichever way it is trained.
 2. **Why: a global-average-pooled encoder is blind to blur at initialisation.**
    EDM zero-inits the last conv of every residual block, so the encoder starts
