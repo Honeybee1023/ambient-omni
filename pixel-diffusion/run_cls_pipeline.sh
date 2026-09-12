@@ -33,7 +33,7 @@ PY=python
 
 # lysine's b0+b5 build is celeba_dynamic_t_v2_b0b5; proline's is celeba_dynamic_t_v2.
 SRC="${CLS_SRC:-$( [ -d "${AMBIENT_BASE}/annotated_datasets/celeba_dynamic_t_v2_b0b5" ] && echo celeba_dynamic_t_v2_b0b5 || echo celeba_dynamic_t_v2 )}"
-CLS_DATA="${AMBIENT_BASE}/annotated_datasets/celeba_cls_paired"
+CLS_DATA="${AMBIENT_BASE}/annotated_datasets/${CLS_DATASET:-celeba_cls_paired}"
 CLS_OUT="${CLS_OUT:-${AMBIENT_BASE}/train_outputs/cls_paired_v4}"
 CLS_KIMG=${CLS_KIMG:-1500}
 CKPT="${CLS_OUT}/network-snapshot-$(printf '%06d' "$CLS_KIMG").pkl"
@@ -44,7 +44,7 @@ echo "=== classifier pipeline | GPU $GPU_ID | src $SRC | $(date) ==="
 # --- 1. dataset ------------------------------------------------------------
 if [ ! -f "${CLS_DATA}/cls_labels.jsonl" ]; then
     echo "--- building classifier dataset from $SRC"
-    $PY dataset_creation/create_cls_dataset.py --src "$SRC" --name celeba_cls_paired || exit 1
+    $PY dataset_creation/create_cls_dataset.py --src "$SRC" --name "${CLS_DATASET:-celeba_cls_paired}" --blur_sigma "${CLS_BLUR:-0.5}" || exit 1
 fi
 
 # --- 2. train --------------------------------------------------------------

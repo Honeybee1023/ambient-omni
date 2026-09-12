@@ -56,6 +56,7 @@ def main():
     ap.add_argument("--src", default="celeba_dynamic_t_v2_b0b5",
                     help="existing dataset dir under annotated_datasets holding b0_*/b5_* files")
     ap.add_argument("--name", default="celeba_cls_paired")
+    ap.add_argument("--blur_sigma", type=float, default=0.5, help="b5 is 0.5; larger values are controls")
     args = ap.parse_args()
 
     src = os.path.join(AMBIENT_BASE, "annotated_datasets", args.src)
@@ -67,7 +68,7 @@ def main():
     import numpy as np
     from PIL import Image
     from scipy.ndimage import gaussian_filter
-    BLUR_SIGMA = 0.5                                  # bucket b5
+    BLUR_SIGMA = args.blur_sigma                       # bucket b5 is 0.5
 
     files = sorted(f for f in os.listdir(src) if f.endswith(".jpg"))
     clean = [f for f in files if f.startswith(CLEAN_PREFIX)]
@@ -87,12 +88,13 @@ def main():
             os.symlink(os.path.realpath(os.path.join(src, f)), p)
         add(f, 0)
         # blurred copy of the SAME face: a real file, b5 recipe
-        bname = f.replace(CLEAN_PREFIX, "b5self_", 1)
+        bname = f.replace(CLEAN_PREFIX, "b5self_", 1).replace(".jpg", ".png")
         bp = os.path.join(out, bname)
         if not os.path.exists(bp):
             arr = np.array(Image.open(os.path.join(src, f)).convert("RGB"), dtype=np.float32)
             arr = gaussian_filter(arr, sigma=(BLUR_SIGMA, BLUR_SIGMA, 0))
-            Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8)).save(bp)
+            # PNG: no second JPEG pass eating the very high frequencies the cue lives in
+            Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8)).save(bp.replace(".jpg", ".png"))
         add(bname, 1)
 
     with open(os.path.join(out, "annotations.jsonl"), "w") as fh:
