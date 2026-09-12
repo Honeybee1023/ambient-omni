@@ -76,8 +76,33 @@ def main():
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    # Build the network from training_options.json and copy the EMA weights in,
+    # exactly as annotate.py does. Unpickling the snapshot directly re-executes
+    # the network's source through torch_utils.persistence, which fails outside
+    # the training process for the classifier network; constructing by name and
+    # copying parameters sidesteps that and is the path Ambient-o itself uses.
+    from torch_utils.misc import copy_params_and_buffers
+    # The snapshot embeds ambient_networks.py's source, which begins
+    # `from .networks import ...`. persistence re-executes that source as a
+    # standalone module, where a relative import has no parent package and
+    # raises ImportError. persistence provides import_hook for precisely this:
+    # rewrite the embedded source before it is exec'd.
+    def _fix_relative_import(meta):
+        meta.module_src = meta.module_src.replace("from .networks import",
+                                                  "from training.networks import")
+        return meta
+    persistence.import_hook(_fix_relative_import)
+    opts_path = os.path.join(os.path.dirname(args.checkpoint_path), "training_options.json")
+    with open(opts_path) as f:
+        options = json.load(f)
+    interface_kwargs = dict(img_resolution=options["dataset_kwargs"]["resolution"],
+                            img_channels=3, label_dim=0)
+    net = dnnlib.util.construct_class_by_name(**options["network_kwargs"], **interface_kwargs)
     with open(args.checkpoint_path, "rb") as f:
-        net = pickle.load(f)["ema"].to(device).eval()
+        data = pickle.load(f)
+    copy_params_and_buffers(src_module=data["ema"], dst_module=net, require_all=False)
+    del data
+    net = net.to(device).eval()
 
     # Same grid as annotate.py, including the seed -- it is the grid the
     # training loop will read back from sigmas.txt.
