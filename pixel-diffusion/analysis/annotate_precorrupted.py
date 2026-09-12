@@ -54,7 +54,7 @@ from torch_utils import persistence                # noqa: F401
 from ambient_utils.classifier import get_classifier_trajectory, analyze_classifier_trajectory
 from training.training_loop import apply_ema, sigma_min_to_t
 
-CLEAN_PREFIX, CORRUPT_PREFIX = "b0_", "b5_"
+DEFAULT_CLEAN_PREFIX, DEFAULT_CORRUPT_PREFIX = "b0_", "b5_"
 
 
 def load_image(path):
@@ -73,7 +73,11 @@ def main():
     ap.add_argument("--max_images", type=int, default=None, help="annotate a subset (for a quick median)")
     ap.add_argument("--cls_epsilon", type=float, default=0.05, help="train.py default")
     ap.add_argument("--cls_ema_window", type=int, default=32, help="train.py default")
+    ap.add_argument("--clean_prefix", default=DEFAULT_CLEAN_PREFIX)
+    ap.add_argument("--corrupt_prefix", default=DEFAULT_CORRUPT_PREFIX,
+                    help="e.g. bX_ for a directory of held-out faces blurred at a control strength")
     args = ap.parse_args()
+    CLEAN_PREFIX, CORRUPT_PREFIX = args.clean_prefix, args.corrupt_prefix
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     # Build the network from training_options.json and copy the EMA weights in,
@@ -116,7 +120,7 @@ def main():
         for s in sigmas:
             f.write(f"{s.item()}\n")
 
-    files = sorted(f for f in os.listdir(args.dataset_path) if f.endswith(".jpg"))
+    files = sorted(f for f in os.listdir(args.dataset_path) if f.endswith((".jpg", ".png")))
     corrupt = [f for f in files if f.startswith(CORRUPT_PREFIX)]
     clean = [f for f in files if f.startswith(CLEAN_PREFIX)]
     if args.max_images:
