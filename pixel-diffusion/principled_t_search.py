@@ -105,6 +105,21 @@ RUNS = [
         "schedule": {"type": "static", "t_start": 0.50, "probe": probe()},
     },
 
+    # -- Ambient-o's own verdict for this data, run verbatim -----------------
+    {
+        # Ambient-o's annotator assigns our blur bucket T = 0.027 (the bottom
+        # of its sigma grid) for 97% of images, whichever way the classifier
+        # is trained: at sigma_blur = 0.5 it never leaves chance; trained on a
+        # stronger blur it classifies our images as clean. So the faithful
+        # Ambient-o run on this dataset is static T = 0.027: blurred data
+        # eligible at essentially every noise level, all run long. This is the
+        # MIND that verdict actually earns, to sit next to static 0.50 (the
+        # MIND-optimal static) and the 0 -> 0.95 schedule.
+        "name": "amb_static_T0027",
+        "note": "static T=0.027 = Ambient-o's annotated threshold for b5; probe logs only.",
+        "schedule": {"type": "static", "t_start": 0.027, "probe": probe()},
+    },
+
     # -- closed loop: one run per metric -----------------------------------
     {
         "name": "pr_skill",
