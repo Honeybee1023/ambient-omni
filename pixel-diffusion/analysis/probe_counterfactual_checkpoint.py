@@ -146,6 +146,11 @@ def main():
     with open(os.path.join(args.probe_dir, "probe_set.json")) as f:
         files = json.load(f)["files"][:args.n_eval]
     hold = load_paths([os.path.join(args.probe_dir, "clean", f) for f in files], device)
+    # Blurred twins of the same held-out faces. Discriminates "genuinely better
+    # on clean faces" from "learned to predict blur": a model that has drifted
+    # toward blurrier predictions improves MORE on blurred targets than on
+    # clean ones. Compare delta_clean against delta_blur per level.
+    hold_blur = load_paths([os.path.join(args.probe_dir, "blur05", f) for f in files], device)
     train_eval = clean[:args.n_eval]                  # memorisation arm
     print(f"loaded {len(clean_paths)} clean + {len(blur_paths)} blurry, {args.n_eval} held-out  ({time.time()-t0:.0f}s)")
 
@@ -169,6 +174,7 @@ def main():
 
     def evaluate(net):
         return {"holdout": per_level_mse(net, hold, ev_noise, sigmas, 80),
+                "holdout_blur": per_level_mse(net, hold_blur, ev_noise, sigmas, 80),
                 "train": per_level_mse(net, train_eval, ev_noise, sigmas, 80)}
 
     e0 = evaluate(net0)
@@ -197,6 +203,10 @@ def main():
     for i, t in enumerate(t_grid):
         mark = " <- opened" if in_band[i] else ""
         print(f"  {t:>6.3f} {dB[i]:>10.5f} {dA[i]:>10.5f} {rel[i]:>+10.3f} {gapB[i]/dB[i]:>+9.3f} {gapA[i]/dA[i]:>+9.3f}{mark}")
+    relb = (res["A_blur_in_band"]["holdout_blur"] - res["B_no_blur"]["holdout_blur"]) / res["B_no_blur"]["holdout_blur"]
+    print(f"\n  rel delta on CLEAN held-out, in band: {rel[in_band].mean():+.4f}   on BLURRED held-out: {relb[in_band].mean():+.4f}")
+    print(f"  (if the blurred-target improvement is much larger, arm A learned to blur rather than to denoise)")
+    out_extra = {"rel_delta_blur_target": relb.tolist()}
     print(f"\n  in-band mean rel delta: {rel[in_band].mean():+.4f}   "
           f"(negative = blurry data HELPED held-out clean error in the band)")
     print(f"  out-of-band mean rel delta: {rel[~in_band].mean():+.4f}")
@@ -205,7 +215,7 @@ def main():
            "before": {k: v.tolist() for k, v in e0.items()},
            "A_blur_in_band": {k: (v.tolist() if hasattr(v, "tolist") else v) for k, v in res["A_blur_in_band"].items()},
            "B_no_blur": {k: (v.tolist() if hasattr(v, "tolist") else v) for k, v in res["B_no_blur"].items()},
-           "rel_delta": rel.tolist(), "in_band": in_band.tolist(),
+           "rel_delta": rel.tolist(), "in_band": in_band.tolist(), **out_extra,
            "in_band_mean_rel_delta": float(rel[in_band].mean())}
     os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
     with open(args.out, "w") as f:
