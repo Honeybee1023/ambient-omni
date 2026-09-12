@@ -33,18 +33,18 @@ PY=python
 
 # lysine's b0+b5 build is celeba_dynamic_t_v2_b0b5; proline's is celeba_dynamic_t_v2.
 SRC="${CLS_SRC:-$( [ -d "${AMBIENT_BASE}/annotated_datasets/celeba_dynamic_t_v2_b0b5" ] && echo celeba_dynamic_t_v2_b0b5 || echo celeba_dynamic_t_v2 )}"
-CLS_DATA="${AMBIENT_BASE}/annotated_datasets/celeba_cls_b0b5"
-CLS_OUT="${AMBIENT_BASE}/train_outputs/cls_b0b5_v3"
+CLS_DATA="${AMBIENT_BASE}/annotated_datasets/celeba_cls_paired"
+CLS_OUT="${AMBIENT_BASE}/train_outputs/cls_paired_v4"
 CLS_KIMG=${CLS_KIMG:-1500}
 CKPT="${CLS_OUT}/network-snapshot-$(printf '%06d' "$CLS_KIMG").pkl"
-ANN_OUT="${AMBIENT_BASE}/annotated_datasets/celeba_amb_perimage_v3"
+ANN_OUT="${AMBIENT_BASE}/annotated_datasets/celeba_amb_perimage_v4"
 
 echo "=== classifier pipeline | GPU $GPU_ID | src $SRC | $(date) ==="
 
 # --- 1. dataset ------------------------------------------------------------
 if [ ! -f "${CLS_DATA}/cls_labels.jsonl" ]; then
     echo "--- building classifier dataset from $SRC"
-    $PY dataset_creation/create_cls_dataset.py --src "$SRC" --name celeba_cls_b0b5 || exit 1
+    $PY dataset_creation/create_cls_dataset.py --src "$SRC" --name celeba_cls_paired || exit 1
 fi
 
 # --- 2. train --------------------------------------------------------------
@@ -55,7 +55,7 @@ if [ ! -f "$CKPT" ]; then
     # All sigma_min are 0 so both classes are drawn at every noise level; the
     # loss noises x0 itself. --snap/--dump in ticks of 10 kimg.
     $PY -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
-        --outdir="$CLS_OUT" --nosubdir --data="$CLS_DATA" --expr_id=cls_b0b5 \
+        --outdir="$CLS_OUT" --nosubdir --data="$CLS_DATA" --expr_id=cls_paired \
         --precond=edmcls --overwrite_cls_labels_path="${CLS_DATA}/cls_labels.jsonl" \
         --cond=0 --arch=ddpmpp --batch=64 --tick=10 --snap=5 --dump=5 \
         --corruption_probability=0.0 --noise_config=identity --s_max=4 \
