@@ -685,11 +685,20 @@ Five blur strengths, one control per point; the σ=0.5 point is our bucket.
 
 | sigma_blur | classifier leaves chance at | annotated T, median (q10-q90) |
 |---|---|---|
-| **0.5 (b5, ours)** | **not by 2300 kimg** (5000-kimg run pending) | **≈ 0.03, every image** |
+| **0.5 (b5, ours)** | **~850 kimg** (5000-kimg run; corrected) | **0.03 if undertrained; 0.84 median (bimodal) once trained** |
 | 0.75 | 121 kimg | 0.92 (0.79-0.95) |
 | 1.0 | 55 kimg | 0.93 (0.84-0.99) |
 | 1.5 | 10 kimg | 0.97 (0.92-0.99) |
 | 2.0 | < 10 kimg | 0.99 (0.95-0.99) |
+
+**Correction (2026-09-12):** the 5000-kimg run at σ=0.5 *did* leave chance, at
+~850 kimg (loss 0.69 → 0.61 → 0.48 → 0.23 → 0.03 at 800/850/900/1500/5000 kimg);
+an earlier read of "not by 2300" was wrong. The trained classifier assigns the
+real b5 files (3000, unseen identities) median T 0.844 (q10 0.036, q90 0.930)
+and 1024 held-out σ=0.5 faces median 0.827 — bimodal, ~10–15% at the bottom of
+the grid. So the annotator's verdict depends on how long its classifier trains:
+T≈0.03 undertrained, T≈0.84 trained. Finding 1 below should be read as a
+detection *delay* that grows steeply as the blur weakens, not a floor.
 
 Three findings:
 
