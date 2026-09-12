@@ -670,6 +670,60 @@ n=4 runs / 3 distinct schedules. This test raises confidence because it was a
 prediction rather than a fit, but "permissive early + high ceiling" is a
 hypothesis with one successful out-of-sample test, not an established law.
 
+### Ambient-o's own annotator on this data (2026-09-11/12)
+
+Question: what threshold does Ambient-o's classifier-based annotation assign to
+our blur bucket, and how does that compare with the MIND-optimal static
+threshold (0.50) and the optimal schedule (0 -> 0.95)?
+
+Method: Ambient-o's own machinery in this repo (`train.py --precond=edmcls`,
+`analysis/annotate_precorrupted.py` = `analysis/annotate.py` for pre-corrupted
+files), trained on **the same 500 faces in both classes** (clean, and blurred
+by us at the bucket's strength) so that identity carries no label -- the
+setting Ambient-o itself trains in. Thresholds read on 1024 held-out faces.
+Five blur strengths, one control per point; the σ=0.5 point is our bucket.
+
+| sigma_blur | classifier leaves chance at | annotated T, median (q10-q90) |
+|---|---|---|
+| **0.5 (b5, ours)** | **not by 2300 kimg** (5000-kimg run pending) | **≈ 0.03, every image** |
+| 0.75 | 121 kimg | 0.92 (0.79-0.95) |
+| 1.0 | 55 kimg | 0.93 (0.84-0.99) |
+| 1.5 | 10 kimg | 0.97 (0.92-0.99) |
+| 2.0 | < 10 kimg | 0.99 (0.95-0.99) |
+
+Three findings:
+
+1. **The annotator has a detection floor, and our corruption is below it.**
+   Every stronger blur is learned in minutes; σ=0.5 is not learned at all --
+   not under the standard training noise, and not when the noise is shifted so
+   the cue sits inside most samples (600 kimg, still at chance). A σ=1
+   detector applied to our σ=0.5 files calls 97% of them *clean* (p≈0.04). So
+   the annotator assigns our bucket T≈0 whichever way it is trained.
+2. **Why: a global-average-pooled encoder is blind to blur at initialisation.**
+   EDM zero-inits the last conv of every residual block, so the encoder starts
+   as ~identity and its pooled feature is ~the image's mean colour, which blur
+   preserves. Learning must bootstrap through zero-init layers from a ~3/255
+   cue; the bootstrap time grows faster than a power law as the blur weakens
+   (10 -> 55 -> 121 -> >2300 kimg).
+3. **Above the floor the annotator is effectively binary.** The moment it can
+   see the blur it assigns T >= 0.92. It never assigns anything near 0.50 for
+   Gaussian blur on these faces at any strength.
+
+Consequences. Ambient-o's verdict for this dataset is static T≈0 -- blurred
+data eligible at every noise level, all run long. **TODO: `amb_static_T0027`
+(running) is that verdict measured in MIND.** The MIND-optimal static is 0.50
+and the optimal schedule is 0 -> 0.95; neither is reachable from the annotator's
+output. This is the same mild-corruption regime in which the idealised
+criterion (the wobble probe, which *can* see the blur) fails as a controller
+(section 7): in this regime the annotator cannot see the corruption, and the
+criterion it implements points the wrong way over training even when it can.
+
+Apparatus notes, kept because each cost an attempt: the LR ramp defaults to
+10,000 kimg (`--lr_rampup_kimg` now exposed); identity leaks the label if the
+two classes are different faces; annotate.py's EMA window of 32 assumes its
+2048-point sigma grid and must be scaled to a smaller one; never overwrite a
+shell script a live shell is executing.
+
 ### Cost, confirmed on a finished run
 
 1308 s of probing across 20 probes, against ~34,280 s of training: **3.8%**,
