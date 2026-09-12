@@ -72,12 +72,19 @@ def main():
     ap.add_argument("--batch_size", type=int, default=64, help="vmap chunk over sigmas")
     ap.add_argument("--max_images", type=int, default=None, help="annotate a subset (for a quick median)")
     ap.add_argument("--cls_epsilon", type=float, default=0.05, help="train.py default")
-    ap.add_argument("--cls_ema_window", type=int, default=32, help="train.py default")
+    ap.add_argument("--cls_ema_window", type=int, default=None,
+                    help="EMA window over the sigma grid. train.py's default of 32 is for annotate.py's "
+                         "2048-point grid; if unset it is scaled to the grid here (32 * num_sigmas / 2048, "
+                         "min 1), otherwise a 64-point grid gets smoothed over half its length and a "
+                         "confident classifier can never fall below the confusion threshold before the grid ends.")
     ap.add_argument("--clean_prefix", default=DEFAULT_CLEAN_PREFIX)
     ap.add_argument("--corrupt_prefix", default=DEFAULT_CORRUPT_PREFIX,
                     help="e.g. bX_ for a directory of held-out faces blurred at a control strength")
     args = ap.parse_args()
     CLEAN_PREFIX, CORRUPT_PREFIX = args.clean_prefix, args.corrupt_prefix
+    if args.cls_ema_window is None:
+        args.cls_ema_window = max(1, round(32 * args.num_sigmas / 2048))
+        print(f"EMA window scaled to the {args.num_sigmas}-point grid: {args.cls_ema_window}")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     # Build the network from training_options.json and copy the EMA weights in,
