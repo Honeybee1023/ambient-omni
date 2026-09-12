@@ -92,6 +92,8 @@ def parse_int_list(s):
 @click.option("--corruption_probability", help="Controls what percentage of images should be corrupted.", type=float, default=0.5)
 @click.option('--dataset_keep_percentage', help='Limit training samples.', type=float, default=1.0, show_default=True)
 @click.option('--cls_epsilon', help='Epsilon for the classifier', type=float, default=0.05, show_default=True)
+@click.option('--cls_sigma_pmean', help='edmcls only: train the classifier on sigma ~ exp(N(pmean, pstd)) instead of the sampler noise', type=float, default=None)
+@click.option('--cls_sigma_pstd',  help='edmcls only: see --cls_sigma_pmean', type=float, default=None)
 @click.option('--cls_ema_window', help='EMA window for the classifier', type=int, default=32, show_default=True)
 @click.option("--overwrite_cls_labels_path", help="Path to the file where the labels are stored", type=str, default=None)
 @click.option("--crop_size", help="Crop size", type=int, default=None)
@@ -183,6 +185,9 @@ def main(**kwargs):
         c.network_kwargs.class_name = 'training.ambient_networks.EDMPrecondCLS'
         c.loss_kwargs.class_name = 'training.loss.AmbientEDMCLSLoss'
         c.network_kwargs.num_classes = 1
+        if opts.cls_sigma_pmean is not None:
+            c.loss_kwargs.cls_sigma_pmean = opts.cls_sigma_pmean
+            c.loss_kwargs.cls_sigma_pstd = opts.cls_sigma_pstd
     else:
         raise ValueError(f"Unknown preconditioning: {opts.precond}")
 

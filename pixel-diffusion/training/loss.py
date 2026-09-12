@@ -46,13 +46,26 @@ class AmbientEDMLoss:
 
 @persistence.persistent_class
 class AmbientEDMCLSLoss:
-    def __init__(self, P_mean=-1.2, P_std=1.2, sigma_data=0.5, *args, **kwargs):
+    def __init__(self, P_mean=-1.2, P_std=1.2, sigma_data=0.5,
+                 cls_sigma_pmean=None, cls_sigma_pstd=None, *args, **kwargs):
         self.P_mean = P_mean
         self.P_std = P_std
         self.sigma_data = sigma_data
-        
+        # Optional: draw the classifier's training noise from its own
+        # log-normal instead of the sampler's (P_mean -1.2, P_std 1.2). Off by
+        # default. Exists because a corruption as mild as a sigma=0.5 blur
+        # (~5/255) is invisible under the standard distribution's median noise
+        # (~38/255): only ~5% of samples carry the cue and the classifier sits
+        # at chance. Shifting P_mean to ~-3 puts the cue inside most samples.
+        # A deviation from the Ambient-o recipe; document it wherever used.
+        self.cls_sigma_pmean = cls_sigma_pmean
+        self.cls_sigma_pstd = cls_sigma_pstd
+
     def __call__(self, net, x0, sigma_t, cls_labels, augment_labels=None, labels=None, *args, **kwargs):
         net._set_static_graph()
+        if self.cls_sigma_pmean is not None:
+            pstd = self.cls_sigma_pstd if self.cls_sigma_pstd is not None else self.P_std
+            sigma_t = (torch.randn_like(sigma_t) * pstd + self.cls_sigma_pmean).exp()
         sigma_t = sigma_t[:, None, None, None]    
         
         x_t = x0 + torch.randn_like(x0) * sigma_t

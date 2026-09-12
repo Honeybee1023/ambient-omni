@@ -34,10 +34,10 @@ PY=python
 # lysine's b0+b5 build is celeba_dynamic_t_v2_b0b5; proline's is celeba_dynamic_t_v2.
 SRC="${CLS_SRC:-$( [ -d "${AMBIENT_BASE}/annotated_datasets/celeba_dynamic_t_v2_b0b5" ] && echo celeba_dynamic_t_v2_b0b5 || echo celeba_dynamic_t_v2 )}"
 CLS_DATA="${AMBIENT_BASE}/annotated_datasets/celeba_cls_paired"
-CLS_OUT="${AMBIENT_BASE}/train_outputs/cls_paired_v4"
+CLS_OUT="${CLS_OUT:-${AMBIENT_BASE}/train_outputs/cls_paired_v4}"
 CLS_KIMG=${CLS_KIMG:-1500}
 CKPT="${CLS_OUT}/network-snapshot-$(printf '%06d' "$CLS_KIMG").pkl"
-ANN_OUT="${AMBIENT_BASE}/annotated_datasets/celeba_amb_perimage_v4"
+ANN_OUT="${ANN_OUT:-${AMBIENT_BASE}/annotated_datasets/celeba_amb_perimage_v4}"
 
 echo "=== classifier pipeline | GPU $GPU_ID | src $SRC | $(date) ==="
 
@@ -59,7 +59,7 @@ if [ ! -f "$CKPT" ]; then
         --precond=edmcls --overwrite_cls_labels_path="${CLS_DATA}/cls_labels.jsonl" \
         --cond=0 --arch=ddpmpp --batch=64 --tick=10 --snap=5 --dump=5 \
         --corruption_probability=0.0 --noise_config=identity --s_max=4 \
-        --lr=3e-4 --lr_rampup_kimg=20 \
+        --lr=3e-4 --lr_rampup_kimg=20 ${CLS_EXTRA:-} \
         --cache=False --duration=$(awk "BEGIN{print $CLS_KIMG/1000}") --seed=0 --workers=8
     [ -f "$CKPT" ] || { echo "ERROR: no classifier checkpoint at $CKPT"; ls "$CLS_OUT"; exit 1; }
 fi
