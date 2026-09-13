@@ -450,6 +450,8 @@ def training_loop(
             if t_schedule.get('type') == 'principled':
                 # The probe fills in for the schedule; before the first probe
                 # this is t_init (0.0 by default: all corrupt data eligible).
+                if hasattr(probe_ctrl, 'tick') and progress >= probe_ctrl.hold_until:
+                    probe_ctrl.tick(progress)
                 current_sigma_min = compute_scheduled_sigma_min(
                     {'type': 'static', 't_start': probe_ctrl.current_T}, progress)
             else:

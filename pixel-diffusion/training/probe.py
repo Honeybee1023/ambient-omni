@@ -106,6 +106,35 @@ def make_t_grid(n=20, lo=0.025, hi=0.975):
 # forward passes
 
 
+_HP_KERNEL = None
+
+
+def _hp_kernel(device, dtype, sigma_px=0.5, radius=3):
+    """1-D Gaussian used to split an image into the band the bucket's blur keeps
+    (B x) and the band it removes (x - B x). sigma_px matches the b5 bucket."""
+    global _HP_KERNEL
+    key = (str(device), str(dtype))
+    if _HP_KERNEL is None or _HP_KERNEL[0] != key:
+        x = torch.arange(-radius, radius + 1, dtype=torch.float32)
+        k = torch.exp(-x ** 2 / (2 * sigma_px ** 2)); k = k / k.sum()
+        _HP_KERNEL = (key, k.to(device=device, dtype=dtype))
+    return _HP_KERNEL[1]
+
+
+def hp_energy(x, sigma_px=0.5):
+    """Per-image mean-square energy of the fine band (x - B x). B is the
+    Gaussian blur of the corrupted bucket, so this is exactly the content that
+    blur removes; a denoiser that has learned to output blurred targets carries
+    less of it than the truth ("softness" = hp_energy(pred) / hp_energy(x))."""
+    import torch.nn.functional as F
+    k = _hp_kernel(x.device, x.dtype, sigma_px)
+    C = x.shape[1]; r = (k.numel() - 1) // 2
+    kx = k.view(1, 1, 1, -1).repeat(C, 1, 1, 1); ky = k.view(1, 1, -1, 1).repeat(C, 1, 1, 1)
+    b = F.conv2d(F.pad(x, (r, r, 0, 0), mode="reflect"), kx, groups=C)
+    b = F.conv2d(F.pad(b, (0, 0, r, r), mode="reflect"), ky, groups=C)
+    return ((x - b) ** 2).mean(dim=(1, 2, 3)).double()
+
+
 @torch.no_grad()
 def _arm(net, imgs, noise, sigma, batch_size):
     """Denoise `imgs` at one sigma under every noise draw in `noise`.
@@ -125,6 +154,7 @@ def _arm(net, imgs, noise, sigma, batch_size):
     N, K = noise.shape[0], noise.shape[1]
     mse = torch.zeros(N, device=imgs.device, dtype=torch.float64)
     pvar = torch.zeros(N, device=imgs.device, dtype=torch.float64)
+    hp = torch.zeros(N, device=imgs.device, dtype=torch.float64)
 
     for i0 in range(0, N, batch_size):
         x0 = imgs[i0:i0 + batch_size]
@@ -139,6 +169,7 @@ def _arm(net, imgs, noise, sigma, batch_size):
             x_t = x0 + s * noise[i0:i0 + b, k]
             pred = net(x_t, s, None).to(torch.float32)
             acc_mse += ((pred - x0) ** 2).mean(dim=(1, 2, 3)).double()
+            hp[i0:i0 + b] += hp_energy(pred) / K
             p = pred.double()
             psum += p
             psq += p * p
@@ -149,7 +180,7 @@ def _arm(net, imgs, noise, sigma, batch_size):
             v = (psq - psum * psum / K) / (K - 1)
             pvar[i0:i0 + b] = v.clamp_min(0).mean(dim=(1, 2, 3))
 
-    return mse.cpu().numpy(), pvar.cpu().numpy()
+    return mse.cpu().numpy(), pvar.cpu().numpy(), hp.cpu().numpy()
 
 
 def blind_mse(mean_square, sigma, sigma_data=SIGMA_DATA):
@@ -269,7 +300,8 @@ def _stats(paired_gap, clean, corrupt, clean_u, corrupt_u):
 
 @torch.no_grad()
 def run_probe(net, clean_imgs, corrupt_imgs, t_grid=None, n_draws=2,
-              batch_size=250, probe_seed=0, split=None, sigma_data=SIGMA_DATA):
+              batch_size=250, probe_seed=0, split=None, sigma_data=SIGMA_DATA,
+              train_imgs=None):
     """One full probe. Returns a dict of per-sigma statistics for all metrics.
 
     clean_imgs / corrupt_imgs : [N, C, H, W] in [-1, 1], SAME faces in the same
@@ -300,14 +332,34 @@ def run_probe(net, clean_imgs, corrupt_imgs, t_grid=None, n_draws=2,
     # Per-image pixel energy, for the analytic blind reference. Free.
     msq_c = clean_imgs.pow(2).mean(dim=(1, 2, 3)).double().cpu().numpy()
     msq_x = corrupt_imgs.pow(2).mean(dim=(1, 2, 3)).double().cpu().numpy()
+    # Fine-band energy of the clean truth: the denominator of "softness".
+    hp_truth = float(hp_energy(clean_imgs).mean().item())
+    # Optional third arm: the model's OWN training clean faces, with their own
+    # (fixed) noise. mem_gap = (held-out MSE - train MSE) / held-out MSE per
+    # level is the memorisation view used by the trigger controllers.
+    noise_tr = None
+    if train_imgs is not None:
+        gen_tr = torch.Generator(device=device); gen_tr.manual_seed(int(probe_seed) + 1)
+        noise_tr = torch.randn((train_imgs.shape[0], n_draws) + tuple(train_imgs.shape[1:]),
+                               generator=gen_tr, device=device, dtype=train_imgs.dtype)
 
     t0 = time.time()
     per_sigma = []
     for t_val, sig in zip(t_grid, sigmas):
-        mse_c, pv_c = _arm(net, clean_imgs, noise, sig, batch_size)
-        mse_x, pv_x = _arm(net, corrupt_imgs, noise, sig, batch_size)
+        mse_c, pv_c, hp_c = _arm(net, clean_imgs, noise, sig, batch_size)
+        mse_x, pv_x, hp_x = _arm(net, corrupt_imgs, noise, sig, batch_size)
 
-        rec = {"t": float(t_val), "sigma": float(sig)}
+        rec = {"t": float(t_val), "sigma": float(sig),
+               # softness: fine-band energy of the output over that of the clean
+               # truth; ~0.38 at sigma 0.85 while blurred targets are eligible
+               # there, ~0.53 once withdrawn (measured on final checkpoints).
+               "soft_clean": float(np.mean(hp_c)) / hp_truth if hp_truth > 0 else float("nan"),
+               "soft_corrupt": float(np.mean(hp_x)) / hp_truth if hp_truth > 0 else float("nan")}
+        if noise_tr is not None:
+            mse_tr, _, _ = _arm(net, train_imgs, noise_tr, sig, batch_size)
+            c_m, tr_m = float(np.mean(mse_c)), float(np.mean(mse_tr))
+            rec["mse_train_mean"] = tr_m
+            rec["mem_gap"] = (c_m - tr_m) / c_m if c_m > 0 else float("nan")
         rec.update(_stats(mse_x - mse_c, mse_c, mse_x, mse_c[:split], mse_x[split:]))
         rec.update(_skill_stats(mse_c, mse_x, msq_c, msq_x, sig, sigma_data))
 
@@ -621,6 +673,16 @@ class ProbeController:
         self.hold_until = float(cfg.get("hold_until", 0.0))
         self.max_step = cfg.get("max_step", None)
         self.image_dir = cfg.get("image_dir")
+        # Which controller turns a probe into T. "boundary" is the original
+        # distinguishability rule (decide_T). The others are the automatic-
+        # schedule search's candidates; each is documented at its method.
+        self.controller = cfg.get("controller", "boundary")
+        self.ctl = dict(cfg.get("ctl", {}) or {})
+        self.train_dir = cfg.get("train_dir")          # 500 training clean faces (b0_*)
+        self.n_train = int(cfg.get("n_train", 256))
+        self._train = None
+        self.hist = []          # per-probe list of per-level dicts (soft_clean, mem_gap, ...)
+        self.trigger_progress = None
 
         self.t_grid = make_t_grid(self.n_levels)
         self.device = device
@@ -663,6 +725,14 @@ class ProbeController:
             raise RuntimeError(f"probe set has {len(files)} images, asked for {self.n_images}")
         files = files[:self.n_images]
 
+        if self.train_dir and self._train is None:
+            import glob
+            fs = sorted(glob.glob(os.path.join(self.train_dir, "b0_*")))[:self.n_train]
+            if not fs:
+                raise RuntimeError(f"no b0_* training faces under {self.train_dir}")
+            tr = [(np.array(Image.open(f).convert("RGB"), dtype=np.float32) / 127.5 - 1.0).transpose(2, 0, 1)
+                  for f in fs]
+            self._train = torch.tensor(np.stack(tr), device=self.device)
         arms = []
         for arm in ("clean", "blur05"):
             imgs = []
@@ -701,10 +771,127 @@ class ProbeController:
             return False
         self.current_T = float(last.get("T_current",
                                last.get("T_smoothed", last.get("T_raw", self.current_T))))
+        self.trigger_progress = last.get("trigger_progress", None)
+        try:
+            with open(self.log_path) as f:
+                for line in f:
+                    try:
+                        r = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    self.hist.append([{k: v for k, v in lvl.items() if k in ("t", "soft_clean", "soft_corrupt", "mem_gap")}
+                                      for lvl in r.get("probe", {}).get("per_sigma", [])])
+        except OSError:
+            pass
         self.raw_T = float(last.get("T_raw", self.current_T))
         self.n_probes = int(last.get("probe_index", 0)) + 1
         self.next_kimg = float(last.get("kimg", 0.0)) + self.every_kimg
         return True
+
+    # -- automatic-schedule candidates ---------------------------------------
+    #
+    # Each returns (T_raw, diagnostics). They share one design fact learned from
+    # the ledger: the good schedules keep blurred data at every noise level for
+    # a long stretch, then withdraw it smoothly with a few hundred kimg left to
+    # recover. A rule that reads a saturating skill gives a concave curve and
+    # fails; these instead read either a *bottleneck* (soft_slope), a *trigger*
+    # plus a fixed withdrawal shape (trigger_ramp), or a *target with the
+    # remaining budget in the loop* (soft_target).
+
+    def _levels(self, key, n_last):
+        """[n_last, n_levels] array of a per-level quantity over the last probes."""
+        h = self.hist[-n_last:]
+        return np.array([[float(l.get(key, np.nan)) for l in rec] for rec in h])
+
+    def _soft_slope(self, result):
+        """Bottleneck detector. While blurred targets are eligible at a level,
+        the output's fine-band energy there keeps creeping up as the model learns;
+        when it stops creeping, learning at that level is limited by the blurred
+        targets, not by time, so blur is withdrawn from that level. Withdrawal
+        proceeds from the lowest eligible level upward and never reverses.
+        ctl: window (probes, default 3), eps (relative slope per probe, 0.005)."""
+        win = int(self.ctl.get("window", 3)); eps = float(self.ctl.get("eps", 0.005))
+        grid = np.asarray(result["t_grid"])
+        if len(self.hist) < win:
+            return self.current_T, {"reason": "warming up", "flags": []}
+        S = self._levels("soft_clean", win)                   # [win, L]
+        x = np.arange(win)
+        slope = np.array([np.polyfit(x, S[:, j], 1)[0] for j in range(S.shape[1])])
+        rel = slope / np.maximum(S[-1], 1e-9)
+        eligible = grid >= self.current_T - 1e-9              # blur still used here
+        flat = rel < eps
+        k = int(np.searchsorted(grid, self.current_T - 1e-9))  # first eligible level
+        while k < len(grid) and flat[k]:
+            k += 1
+        t = 1.0 if k >= len(grid) else float(grid[k])
+        t = max(t, self.current_T)
+        return t, {"rel_slope": [float(v) for v in rel], "flat": [bool(v) for v in flat],
+                   "eligible": [bool(v) for v in eligible], "boundary_index": k}
+
+    def _trigger_ramp(self, result, progress):
+        """Two-stage: keep T=0 until a memorisation trigger fires, then follow a
+        fixed concave withdrawal over the remaining budget. Trigger = mean
+        memorisation gap over levels with t <= gap_t_max exceeds gap_thr.
+        ctl: gap_thr (0.08), gap_t_max (0.35), shape ('concave' -> 0.75 at the
+        midpoint, 'linear'), t_end (0.95), force_at (progress, default 0.6:
+        safety net, logged if used)."""
+        thr = float(self.ctl.get("gap_thr", 0.08)); tmax = float(self.ctl.get("gap_t_max", 0.35))
+        t_end = float(self.ctl.get("t_end", 0.95)); force_at = float(self.ctl.get("force_at", 0.6))
+        ps = result["per_sigma"]
+        gaps = [float(r.get("mem_gap", np.nan)) for r in ps if r["t"] <= tmax + 1e-9]
+        g = float(np.nanmean(gaps)) if gaps else float("nan")
+        fired_now = False
+        if self.trigger_progress is None:
+            if np.isfinite(g) and g > thr:
+                self.trigger_progress = progress; fired_now = True
+            elif progress >= force_at:
+                self.trigger_progress = progress; fired_now = True
+        t = self.ramp_T(progress, t_end)
+        return t, {"mem_gap_low": g, "fired_now": fired_now, "forced": bool(fired_now and not (np.isfinite(g) and g > thr)),
+                   "trigger_progress": self.trigger_progress}
+
+    def ramp_T(self, progress, t_end=0.95):
+        if self.trigger_progress is None:
+            return 0.0
+        u = (progress - self.trigger_progress) / max(1.0 - self.trigger_progress, 1e-9)
+        u = float(np.clip(u, 0.0, 1.0))
+        shape = self.ctl.get("shape", "concave")
+        if shape == "linear":
+            return t_end * u
+        return float(np.interp(u, [0.0, 0.5, 1.0], [0.0, 0.75 * t_end / 0.95, t_end]))
+
+    def _soft_target(self, result, progress):
+        """Budget-in-the-loop. For each level, the softness deficit is how far the
+        output's fine-band energy sits below the best seen at any level that has
+        already been withdrawn (or, before any withdrawal, below the top level's
+        own running maximum). Withdrawal at a level costs a recovery time tau
+        (ctl, default 300 kimg, measured on the ledger's trajectories); the
+        controller withdraws a level when the remaining budget falls to
+        n_pending * tau / parallelism, i.e. it plans backwards from the end so
+        every level is recovered exactly at the finish and blurred data is used
+        as long as possible before that.
+        ctl: tau_kimg (300), parallel (4: levels recovering concurrently),
+        total_kimg (2000), t_end (0.95)."""
+        tau = float(self.ctl.get("tau_kimg", 300)); par = float(self.ctl.get("parallel", 4))
+        total = float(self.ctl.get("total_kimg", 2000)); t_end = float(self.ctl.get("t_end", 0.95))
+        grid = np.asarray(result["t_grid"])
+        remaining = (1.0 - progress) * total
+        pending = grid[(grid >= self.current_T - 1e-9) & (grid <= t_end + 1e-9)]
+        n_pending = len(pending)
+        # how many levels must already be withdrawn to finish on time
+        need = n_pending - int(np.floor(remaining / tau * par))
+        t = self.current_T
+        if need > 0:
+            k = int(np.searchsorted(grid, self.current_T - 1e-9)) + need
+            t = min(float(grid[k]) if k < len(grid) else 1.0, t_end)
+        return max(t, self.current_T), {"remaining_kimg": remaining, "n_pending": n_pending, "need": int(need)}
+
+    def tick(self, progress):
+        """Between probes: controllers whose T is a function of progress keep
+        moving (the trigger ramp), so the applied T is smooth rather than a
+        staircase at the probe cadence."""
+        if self.controller == "trigger_ramp" and self.trigger_progress is not None:
+            self.current_T = float(np.clip(self.ramp_T(progress, float(self.ctl.get("t_end", 0.95))), 0.0, 1.0))
 
     # -- the step ----------------------------------------------------------
 
@@ -714,9 +901,21 @@ class ProbeController:
         kimg = cur_nimg / 1000.0
         result = run_probe(net, self._clean, self._corrupt, t_grid=self.t_grid,
                            n_draws=self.n_draws, batch_size=self.batch_size,
-                           probe_seed=self.probe_seed)
+                           probe_seed=self.probe_seed, train_imgs=self._train)
+        self.hist.append([{k: v for k, v in lvl.items() if k in ("t", "soft_clean", "soft_corrupt", "mem_gap")}
+                          for lvl in result["per_sigma"]])
+        progress = kimg / total_kimg if total_kimg else 0.0
 
-        t_raw, diag = decide_T(result, self.metric, self.rule, self.threshold, self.q)
+        if self.controller == "boundary":
+            t_raw, diag = decide_T(result, self.metric, self.rule, self.threshold, self.q)
+        elif self.controller == "soft_slope":
+            t_raw, diag = self._soft_slope(result)
+        elif self.controller == "trigger_ramp":
+            t_raw, diag = self._trigger_ramp(result, progress)
+        elif self.controller == "soft_target":
+            t_raw, diag = self._soft_target(result, progress)
+        else:
+            raise ValueError(f"unknown controller {self.controller!r}")
         prev = self.current_T
         t_new = (1.0 - self.alpha) * prev + self.alpha * t_raw if self.n_probes > 0 else t_raw
         if self.max_step is not None:
@@ -743,7 +942,9 @@ class ProbeController:
             # hold is in force. restore() must read this one: keying off
             # T_smoothed would resume a preempted run at a T it never trained at.
             "T_current": self.current_T,
-            "controller": {"metric": self.metric, "rule": self.rule,
+            "trigger_progress": self.trigger_progress,
+            "controller": {"name": self.controller, "ctl": self.ctl,
+                           "metric": self.metric, "rule": self.rule,
                            "threshold": self.threshold, "q": self.q,
                            "alpha": self.alpha, "monotone": self.monotone,
                            "max_step": self.max_step},
