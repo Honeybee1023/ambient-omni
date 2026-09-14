@@ -683,6 +683,8 @@ class ProbeController:
         self._train = None
         self.hist = []          # per-probe list of per-level dicts (soft_clean, mem_gap, ...)
         self._recent_full = []  # last few probes' per-level held-out / train MSE (starve rule)
+        self.withdrawn_at = {}  # level index -> kimg at which blur left it (backplan)
+        self.tau_seen = {}      # level index -> observed recovery time in kimg
         self.trigger_progress = None
 
         self.t_grid = make_t_grid(self.n_levels)
@@ -773,6 +775,8 @@ class ProbeController:
         self.current_T = float(last.get("T_current",
                                last.get("T_smoothed", last.get("T_raw", self.current_T))))
         self.trigger_progress = last.get("trigger_progress", None)
+        self.withdrawn_at = {int(k): v for k, v in (last.get("withdrawn_at") or {}).items()}
+        self.tau_seen = {int(k): v for k, v in (last.get("decision", {}).get("tau_seen") or {}).items()}
         try:
             with open(self.log_path) as f:
                 for line in f:
@@ -923,6 +927,65 @@ class ProbeController:
         return t, {"starved": [bool(v) for v in starved], "slope_train": [float(v) for v in s_tr],
                    "slope_holdout": [float(v) for v in s_ho]}
 
+    def _backplan(self, result, progress, kimg):
+        """Self-calibrating backward plan -- the controller the look-ahead result
+        points to. It never asks "is quality better now?" (that question is
+        confidently inverted at every affordable horizon). It asks only: how long
+        does a noise level take to recover once blurred targets are withdrawn
+        from it, and therefore how late can withdrawal start and still finish?
+
+        Recovery time is measured on this run, not assumed. When a level is
+        withdrawn, its fine-band energy (soft_clean) rises and then plateaus; the
+        elapsed kimg from withdrawal to plateau IS tau for that level. The mean
+        of the observed taus replaces the prior as soon as one level has
+        plateaued, and withdrawal of the remaining levels is paced so the last
+        one gets tau kimg before the end.
+
+        ctl: tau_prior (300), parallel (levels recovering at once, 4),
+        total_kimg (2000), t_end (0.95), window (3 probes for the slope),
+        eps_flat (0.004 relative slope per probe = plateaued),
+        tau_min/tau_max (100 / 900 kimg clip)."""
+        c = self.ctl
+        tau_prior = float(c.get("tau_prior", 300)); par = float(c.get("parallel", 4))
+        total = float(c.get("total_kimg", 2000)); t_end = float(c.get("t_end", 0.95))
+        win = int(c.get("window", 3)); eps = float(c.get("eps_flat", 0.004))
+        tmin, tmax = float(c.get("tau_min", 100)), float(c.get("tau_max", 900))
+        grid = np.asarray(result["t_grid"])
+
+        # -- record which levels are withdrawn, and when
+        for j, t in enumerate(grid):
+            if t < self.current_T - 1e-9 and j not in self.withdrawn_at:
+                self.withdrawn_at[j] = kimg
+        # -- observe tau: a withdrawn level whose softness has stopped rising
+        if len(self.hist) >= win:
+            S = self._levels("soft_clean", win); x = np.arange(win)
+            for j, k0 in list(self.withdrawn_at.items()):
+                if j in self.tau_seen or kimg - k0 < 50:
+                    continue
+                col = S[:, j]
+                if not np.all(np.isfinite(col)):
+                    continue
+                rel = np.polyfit(x, col, 1)[0] / max(abs(col[-1]), 1e-9)
+                if abs(rel) < eps:
+                    self.tau_seen[j] = kimg - k0
+        tau = float(np.mean(list(self.tau_seen.values()))) if self.tau_seen else tau_prior
+        tau = float(np.clip(tau, tmin, tmax))
+
+        remaining = (1.0 - progress) * total
+        pending = grid[(grid >= self.current_T - 1e-9) & (grid <= t_end + 1e-9)]
+        n_pending = len(pending)
+        # Levels that can still be started later and finish in time; the rest
+        # must start now. Withdrawal is as late as possible, which is the point.
+        can_wait = int(np.floor(max(remaining - tau, 0.0) / max(tau, 1e-9) * par))
+        need = n_pending - can_wait
+        t = self.current_T
+        if need > 0:
+            k = int(np.searchsorted(grid, self.current_T - 1e-9)) + need
+            t = min(float(grid[k]) if k < len(grid) else 1.0, t_end)
+        return max(t, self.current_T), {"tau": tau, "tau_seen": {str(k): v for k, v in self.tau_seen.items()},
+                                        "remaining_kimg": remaining, "n_pending": n_pending,
+                                        "can_wait": can_wait, "need": int(need)}
+
     def tick(self, progress):
         """Between probes: controllers whose T is a function of progress keep
         moving (the trigger ramp), so the applied T is smooth rather than a
@@ -956,6 +1019,8 @@ class ProbeController:
             t_raw, diag = self._soft_target(result, progress)
         elif self.controller == "starve":
             t_raw, diag = self._starve(result)
+        elif self.controller == "backplan":
+            t_raw, diag = self._backplan(result, progress, kimg)
         else:
             raise ValueError(f"unknown controller {self.controller!r}")
         prev = self.current_T
@@ -985,6 +1050,7 @@ class ProbeController:
             # T_smoothed would resume a preempted run at a T it never trained at.
             "T_current": self.current_T,
             "trigger_progress": self.trigger_progress,
+            "withdrawn_at": {str(k): v for k, v in self.withdrawn_at.items()},
             "controller": {"name": self.controller, "ctl": self.ctl,
                            "metric": self.metric, "rule": self.rule,
                            "threshold": self.threshold, "q": self.q,

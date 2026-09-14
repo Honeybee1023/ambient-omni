@@ -62,10 +62,27 @@ RUNS = [
      "schedule": {"type": "principled", "probe": probe(controller="soft_target", ctl={"tau_kimg": 300, "parallel": 4, "total_kimg": 2000})}},
 ]
 
+# Round 2 (2026-09-14), designed from the look-ahead result: no controller may
+# ask "is sample quality better now?" -- that question is confidently inverted
+# at every affordable horizon (T=0.95 wins at 250 kimg with a 300-kimg horizon).
+# Both entries below ask only *when withdrawal must start so recovery finishes*.
+PHASE2 = "auto2"
+ROUND2 = [
+    {"name": "auto_backplan", "note": "self-calibrating backward plan; recovery time measured on this run, all levels recover concurrently",
+     "schedule": {"type": "principled", "probe": probe(controller="backplan",
+                  ctl={"tau_prior": 300, "parallel": 20, "total_kimg": 2000, "t_end": 0.95})}},
+    {"name": "auto_backplan_slow", "note": "same, but assuming only 4 levels recover at a time: withdrawal starts much earlier and ramps",
+     "schedule": {"type": "principled", "probe": probe(controller="backplan",
+                  ctl={"tau_prior": 300, "parallel": 4, "total_kimg": 2000, "t_end": 0.95})}},
+]
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--manifest", default=MANIFEST); ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     for r in RUNS: r["phase"] = PHASE
+    for r in ROUND2: r["phase"] = PHASE2
+    RUNS.extend(ROUND2)
     m = json.load(open(a.manifest)) if os.path.exists(a.manifest) else {"runs": []}
     names = {r["name"] for r in RUNS}
     m["runs"] = [e for e in m.get("runs", []) if e.get("name") not in names] + RUNS
