@@ -27,7 +27,18 @@ ROUND1 = [
     ("man_b40_concave",       "winner shape with the blade ending at 40%",     pw([(0,0),(0.4,0),(0.7,0.75),(1,0.95)])),
     ("man_b60_concave",       "winner shape with the blade ending at 60%",     pw([(0,0),(0.6,0),(0.8,0.75),(1,0.95)])),
 ]
-ROUND2 = []   # filled after round 1
+ROUND2 = [   # coverage round (2026-09-13): fill the empty cells of (blade end, T_end, middle shape)
+    ("man_b75_linear",     "very late blade: T=0 until 75%, straight to 0.95",            pw([(0,0),(0.75,0),(1,0.95)])),
+    ("man_b90_linear",     "extreme late blade: T=0 until 90%, straight to 0.95",         pw([(0,0),(0.9,0),(1,0.95)])),
+    ("man_b75_concave",    "late blade, concave: 0.75 at 87.5%",                          pw([(0,0),(0.75,0),(0.875,0.75),(1,0.95)])),
+    ("man_b50_end80",      "blade to 50%, straight to T_end = 0.80",                      pw([(0,0),(0.5,0),(1,0.80)])),
+    ("man_b50_end90",      "blade to 50%, straight to T_end = 0.90",                      pw([(0,0),(0.5,0),(1,0.90)])),
+    ("man_b25_end100",     "blade to 25%, straight to T_end = 1.0 exactly",               pw([(0,0),(0.25,0),(1,1.0)])),
+    ("man_b50_overshoot",  "blade to 50%, overshoot to 1.0 at 70%, settle at 0.90",       pw([(0,0),(0.5,0),(0.7,1.0),(1,0.90)])),
+    ("man_b25_dip",        "blade to 25%, rise to 0.6, dip to 0.2 at 65%, rise to 0.95",  pw([(0,0),(0.25,0),(0.5,0.6),(0.65,0.2),(1,0.95)])),
+    ("man_noblade_030",    "no blade: start at T=0.3, straight to 0.95",                  pw([(0,0.3),(1,0.95)])),
+    ("man_b10_plateau50",  "short blade to 10%, plateau at 0.5 from 30% to 70%, then 0.95", pw([(0,0),(0.1,0),(0.3,0.5),(0.7,0.5),(1,0.95)])),
+]
 RUNS = [{"name": n, "note": note, "schedule": s} for n, note, s in ROUND1 + ROUND2]
 
 def main():

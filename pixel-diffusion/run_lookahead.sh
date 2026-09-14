@@ -40,7 +40,7 @@ train() {  # outdir duration_mimg schedule extra...
         --duration=$dur --t_schedule="$sched" "$@"
 }
 mind() {  # ckpt name -> writes generated/mind_<name>.json
-    local ck=$1 name=$2 gen="$BASE/generated/${name}_5k_gen" js="$BASE/generated/mind_${name}.json"
+    local ck=$1 name=$2; local gen="$BASE/generated/${name}_5k_gen"; local js="$BASE/generated/mind_${name}.json"
     [ -f "$js" ] && return 0
     if [ ! -f "$gen/.complete" ]; then rm -rf "$gen"; mkdir -p "$gen"
         $PY -m torch.distributed.run --standalone --nproc_per_node=1 --master_port=$((20000 + RANDOM % 20000)) generate.py \
