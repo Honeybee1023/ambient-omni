@@ -77,16 +77,35 @@ ROUND2 = [
 ]
 
 
+# Round 3 (2026-09-14), designed from measured recovery times, not from MIND.
+# Paired same-seed probes (auto_soft_slope vs auto_trigger_concave) show fine
+# detail at low noise comes back within one 100-kimg probe of withdrawing blur;
+# the 9-checkpoint softness trajectories put it at ~250-500 kimg at sigma~0.85
+# and later. Recovery time grows with noise level -- the opposite order to the
+# one a threshold T can express (it always withdraws low noise first).
+PHASE3 = "auto3"
+# tau(t): kimg a level needs between withdrawal and the end. Upper ends of the
+# measured ranges (recovery must finish); 600 at t=1 keeps the top from jumping.
+TOPDOWN_TAU = [[0.0, 100], [0.2, 100], [0.3, 300], [0.5, 400], [0.7, 500], [1.0, 600]]
+ROUND3 = [
+    {"name": "auto_topdown", "note": "top-down withdrawal: each noise level loses blur its measured recovery time before the end (high noise first, low noise last)",
+     "schedule": {"type": "topdown", "tau_points": TOPDOWN_TAU, "total_kimg": 2000, "probe": probe()}},
+    {"name": "auto_test_step75", "note": "principle test, hand-set: T=0 then a jump to 0.95 at 75% (every level withdrawn 500 kimg before the end); probes every 50 kimg measure recovery at all 20 levels",
+     "schedule": {"type": "piecewise", "control_points": [[0.0, 0.0], [0.75, 0.0], [0.75, 0.95], [1.0, 0.95]], "probe": probe(every_kimg=50)}},
+]
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--manifest", default=MANIFEST); ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     for r in RUNS: r["phase"] = PHASE
     for r in ROUND2: r["phase"] = PHASE2
-    RUNS.extend(ROUND2)
+    for r in ROUND3: r["phase"] = PHASE3
+    RUNS.extend(ROUND2); RUNS.extend(ROUND3)
     m = json.load(open(a.manifest)) if os.path.exists(a.manifest) else {"runs": []}
     names = {r["name"] for r in RUNS}
     m["runs"] = [e for e in m.get("runs", []) if e.get("name") not in names] + RUNS
-    for r in RUNS: print(f"  {r['name']:<22} {r['schedule']['probe']['controller']:<14} {r['schedule']['probe'].get('ctl')}")
+    for r in RUNS: print(f"  {r['name']:<22} {r['schedule']['probe'].get('controller', r['schedule']['type']):<14} {r['schedule']['probe'].get('ctl', r['schedule'].get('tau_points', r['schedule'].get('control_points')))}")
     if a.dry_run: return
     if os.path.exists(a.manifest): shutil.copy2(a.manifest, a.manifest + ".bak")
     json.dump(m, open(a.manifest, "w"), indent=2); print(f"wrote {a.manifest} ({len(m['runs'])} runs)")

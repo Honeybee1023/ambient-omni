@@ -125,6 +125,44 @@ def compute_scheduled_sigma_min(t_schedule, progress):
     return t_to_sigma(t_val)
 
 
+def compute_topdown_band(t_schedule, progress):
+    """Top-down withdrawal: blurred images are eligible only BELOW an upper noise cutoff.
+
+    A threshold schedule can only withdraw blur bottom-up (low noise first). The
+    measured recovery times run the other way: after blur is withdrawn, the
+    output's fine detail comes back within <=100 kimg at low noise but takes
+    ~250-500 kimg at sigma ~0.85. So each level t is withdrawn exactly tau(t)
+    kimg before the end, which with tau increasing in t withdraws from the top.
+
+    t_schedule: {'type': 'topdown', 'tau_points': [[t, tau_kimg], ...] (tau
+    non-decreasing in t, linearly interpolated), 'total_kimg': 2000}.
+    Returns t_hi in [0, 1]: blurred images are eligible at noise level T < t_hi.
+    """
+    pts = t_schedule.get('tau_points')
+    if not pts:
+        raise ValueError("topdown t_schedule requires 'tau_points'")
+    ts = np.array([float(p[0]) for p in pts]); taus = np.array([float(p[1]) for p in pts])
+    if np.any(np.diff(ts) < 0) or np.any(np.diff(taus) < 0):
+        raise ValueError(f'topdown tau_points must be sorted with tau non-decreasing in t, got {pts}')
+    total = float(t_schedule.get('total_kimg', 2000))
+    remaining = max(1.0 - float(progress), 0.0) * total
+    if remaining >= taus[-1]:
+        return 1.0
+    grid = np.linspace(0.0, 1.0, 4001)
+    ok = np.interp(grid, ts, taus) <= remaining
+    return float(grid[ok].max()) if ok.any() else 0.0
+
+
+def topdown_band_sigma(t_hi):
+    """Upper sigma edge for a top-down band; inf = no restriction, 0 = never eligible."""
+    from scipy.stats import norm
+    if t_hi >= 0.999:
+        return float('inf')
+    if t_hi <= 0.001:
+        return 0.0
+    return float(np.exp(1.2 * norm.ppf(t_hi) - 1.2))
+
+
 def sigma_min_to_t(sigma_min):
     """Inverse of the T -> sigma_min mapping, for logging the schedule in T units."""
     from scipy.stats import norm
@@ -400,6 +438,9 @@ def training_loop(
         )
     last_scheduled_sigma_min = None
     current_sigma_min = 0.0
+    current_band_max = float('inf')   # top-down schedules only; inf = no upper cutoff
+    current_band_t = 1.0
+    last_band_max = None
     progress_t_value = 0.0
     tick_corrupt_seen = 0
     tick_batch_seen = 0
@@ -454,17 +495,27 @@ def training_loop(
                     probe_ctrl.tick(progress)
                 current_sigma_min = compute_scheduled_sigma_min(
                     {'type': 'static', 't_start': probe_ctrl.current_T}, progress)
+            elif t_schedule.get('type') == 'topdown':
+                # Blur eligible at every noise level BELOW the cutoff; the sampler
+                # ANDs the third field on top (see InfiniteSampler). An infinite
+                # cutoff is written as the plain 2-tuple, bit-identical to T=0.
+                current_sigma_min = 0.0
+                current_band_t = compute_topdown_band(t_schedule, progress)
+                current_band_max = topdown_band_sigma(current_band_t)
             else:
                 current_sigma_min = compute_scheduled_sigma_min(t_schedule, progress)
             progress_t_value = sigma_min_to_t(current_sigma_min)
-            if current_sigma_min != last_scheduled_sigma_min:
+            if current_sigma_min != last_scheduled_sigma_min or current_band_max != last_band_max:
+                ann = ((current_sigma_min, 0.0) if current_band_max == float('inf')
+                       else (current_sigma_min, 0.0, current_band_max))
                 for fname in corrupt_filenames:
-                    annotations[fname] = (current_sigma_min, 0.0)
+                    annotations[fname] = ann
                     # Mirror into the dict the sampler reads, otherwise the
                     # schedule only changes the loss weighting and never the
                     # set of images eligible at the sampled sigma.
-                    dataset_obj.annotations[fname] = (current_sigma_min, 0.0)
+                    dataset_obj.annotations[fname] = ann
                 last_scheduled_sigma_min = current_sigma_min
+                last_band_max = current_band_max
 
         # Accumulate gradients.
         optimizer.zero_grad(set_to_none=True)
@@ -580,6 +631,8 @@ def training_loop(
         fields += [f"reserved {training_stats.report0('Resources/peak_gpu_mem_reserved_gb', torch.cuda.max_memory_reserved(device) / 2**30):<6.2f}"]
         if t_schedule is not None:
             fields += [f"T {progress_t_value:<5.3f}"]
+            if t_schedule.get('type') == 'topdown':
+                fields += [f"Thi {current_band_t:<5.3f}"]
             fields += [f"corrupt {tick_corrupt_frac:<5.3f}"]
         if probe_ctrl is not None:
             # Cumulative probe cost as a fraction of wall clock -- the budget the
