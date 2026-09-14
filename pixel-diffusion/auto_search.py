@@ -10,7 +10,7 @@ concave, static-like curve):
                       not by time). Walks upward from the lowest eligible level;
                       max_step 0.1 per probe keeps the withdrawal smooth.
   auto_trigger_concave two-stage: T=0 until the memorisation gap on the model's
-                      own clean training faces (vs held-out) exceeds 5% at low
+                      own clean training faces (vs held-out) exceeds 3% at low
                       noise, then a fixed concave withdrawal to 0.95 over the
                       remaining budget (the shape study's best).
   auto_trigger_linear same trigger, straight withdrawal (shape control).
@@ -42,9 +42,9 @@ RUNS = [
     {"name": "auto_soft_slope", "note": "bottleneck: withdraw a level when its fine-band energy stops improving under blur",
      "schedule": {"type": "principled", "probe": probe(controller="soft_slope", ctl={"window": 4, "eps": 0.002}, max_step=0.1)}},
     {"name": "auto_trigger_concave", "note": "T=0 until mem gap at low noise > 5%, then concave withdrawal to 0.95",
-     "schedule": {"type": "principled", "probe": probe(controller="trigger_ramp", ctl={"gap_thr": 0.05, "gap_t_max": 0.35, "shape": "concave", "force_at": 0.6})}},
+     "schedule": {"type": "principled", "probe": probe(controller="trigger_ramp", ctl={"gap_thr": 0.03, "gap_t_max": 0.35, "shape": "concave", "force_at": 0.7})}},
     {"name": "auto_trigger_linear", "note": "same trigger, linear withdrawal (shape control)",
-     "schedule": {"type": "principled", "probe": probe(controller="trigger_ramp", ctl={"gap_thr": 0.05, "gap_t_max": 0.35, "shape": "linear", "force_at": 0.6})}},
+     "schedule": {"type": "principled", "probe": probe(controller="trigger_ramp", ctl={"gap_thr": 0.03, "gap_t_max": 0.35, "shape": "linear", "force_at": 0.7})}},
     {"name": "auto_soft_target", "note": "backward plan from a measured 300-kimg recovery time; clock + constant only",
      "schedule": {"type": "principled", "probe": probe(controller="soft_target", ctl={"tau_kimg": 300, "parallel": 4, "total_kimg": 2000})}},
 ]

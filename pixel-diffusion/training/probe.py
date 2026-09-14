@@ -819,7 +819,10 @@ class ProbeController:
         slope = np.array([np.polyfit(x, S[:, j], 1)[0] for j in range(S.shape[1])])
         rel = slope / np.maximum(S[-1], 1e-9)
         eligible = grid >= self.current_T - 1e-9              # blur still used here
-        flat = rel < eps
+        # Flat means no longer moving in EITHER direction: softness first FALLS
+        # (the model learns to strip noise) and only later creeps up, and a
+        # falling level is still learning, not bottlenecked.
+        flat = np.abs(rel) < eps
         k = int(np.searchsorted(grid, self.current_T - 1e-9))  # first eligible level
         while k < len(grid) and flat[k]:
             k += 1
