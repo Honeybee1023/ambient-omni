@@ -19,6 +19,9 @@ cd $BASE/ambient-omni/pixel-diffusion || exit 1
 [ -f "$BASE/.wandb_key" ] && export WANDB_API_KEY=$(cat $BASE/.wandb_key) || export WANDB_MODE=offline
 export CUDA_VISIBLE_DEVICES=${GPU:?set GPU=<uuid>}
 RUN=${1:?run name}; SEED=${SEED:-0}; SEG=${SEG:-250}; BR=${BR:-50}; DELTA=${DELTA:-0.2}; NGEN=${NGEN:-2000}
+# SCORE=mind  : arms judged by MIND on NGEN samples (lower is better)      -> look-ahead alone
+# SCORE=probe : arms judged by analysis/probe_score.py (higher is better) -> softness/starvation judged with look-ahead
+SCORE=${SCORE:-mind}
 TOTAL=2000; TEND=0.95
 DATA="$BASE/annotated_datasets/${DYN_DATASET:-celeba_dynamic_t_v2}"
 HOLDOUT="$BASE/celeba_processed_v2b/holdout_64"; MIND_REF="$BASE/generated/mind_ref_cache.npz"
@@ -35,6 +38,13 @@ train() {  # outdir duration_kimg sched [resume] -> trains to duration (absolute
         --corruption_probability=0.0 --noise_config=identity --s_max=4 --cache=False --workers=8 \
         --duration=$(python3 -c "print($dur/1000)") --seed=$SEED --snap=1000 --dump=1000 --expr_id="${NAME}_$(basename $out)" \
         --t_schedule="$sched" $extra
+}
+score_of() {  # ckpt tag -> prints a "lower is better" score under either SCORE mode
+    local ck=$1 tag=$2 js="$ROOT/score_$tag.json"
+    if [ "$SCORE" = "probe" ]; then
+        if [ ! -f "$js" ]; then $PY analysis/probe_score.py --checkpoint "$ck" --train_dir "$DATA" > "$js" 2>"$ROOT/score_$tag.err" || return 1; fi
+        python3 -c "import json;print(-json.load(open('$js'))['score'])"
+    else mind_of "$ck" "$tag"; fi
 }
 mind_of() {  # ckpt tag -> prints MIND
     local ck=$1 tag=$2 gen="$ROOT/gen_$tag" js="$ROOT/mind_$tag.json"
@@ -64,8 +74,8 @@ while [ $k -lt $TOTAL ]; do
         tag="k$(printf %06d $k)_T${Tc}"; out="$ROOT/arm_$tag"
         if ! ls $out/training-state-*.pt >/dev/null 2>&1; then rm -rf "$out"; mkdir -p "$out"
             train "$out" $kb "$(pw "[[0,$T],[$p0,$T],[$pb,$Tc],[1,$Tc]]")" "$MAIN" || { echo "ARM FAIL $tag"; exit 1; }; fi
-        ck=$(ls $out/network-snapshot-*.pkl | tail -1); m=$(mind_of "$ck" "$tag") || { echo "MIND FAIL $tag"; exit 1; }
-        M[$Tc]=$m; echo "  arm $tag  MIND $m"
+        ck=$(ls $out/network-snapshot-*.pkl | tail -1); m=$(score_of "$ck" "$tag") || { echo "SCORE FAIL $tag"; exit 1; }
+        M[$Tc]=$m; echo "  arm $tag  score($SCORE) $m"
         if [ -z "$best" ] || python3 -c "import sys;sys.exit(0 if $m < $bestm else 1)"; then best=$Tc; bestm=$m; bestout=$out; fi
     done
     # continue the main line from the winning arm to the end of the segment

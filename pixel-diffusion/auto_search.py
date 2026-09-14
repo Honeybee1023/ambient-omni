@@ -14,6 +14,17 @@ concave, static-like curve):
                       noise, then a fixed concave withdrawal to 0.95 over the
                       remaining budget (the shape study's best).
   auto_trigger_linear same trigger, straight withdrawal (shape control).
+  auto_starve         starvation only (control): per level, "starved" = the
+                      model keeps improving on its own clean training faces
+                      while held-out has stopped (memorisation onset). Blur is
+                      used where starved and withdrawn elsewhere. Expected to
+                      want blur more over time (wrong late).
+  auto_beam_mind      look-ahead alone (run_beam.sh, SCORE=mind): branch 50
+                      kimg under T / T+0.2 / T-0.2 every 250 kimg, keep the
+                      arm with the best MIND on 2k samples.
+  auto_beam_probe     combination (run_beam.sh, SCORE=probe): same branching,
+                      arms judged by high-noise softness minus low-noise
+                      memorisation gap from the probe.
   auto_soft_target    backward plan from a measured recovery time (300 kimg per
                       level, 4 levels recovering concurrently): withdraw a level
                       only when the remaining budget requires it. Reads the
@@ -45,6 +56,8 @@ RUNS = [
      "schedule": {"type": "principled", "probe": probe(controller="trigger_ramp", ctl={"gap_thr": 0.03, "gap_t_max": 0.35, "shape": "concave", "force_at": 0.7})}},
     {"name": "auto_trigger_linear", "note": "same trigger, linear withdrawal (shape control)",
      "schedule": {"type": "principled", "probe": probe(controller="trigger_ramp", ctl={"gap_thr": 0.03, "gap_t_max": 0.35, "shape": "linear", "force_at": 0.7})}},
+    {"name": "auto_starve", "note": "starvation only (control): blur where the model is memorising (train error falling, held-out flat), withdrawn elsewhere",
+     "schedule": {"type": "principled", "probe": probe(controller="starve", ctl={"window": 4, "eps_train": -0.005, "eps_hold": 0.005}, max_step=0.15)}},
     {"name": "auto_soft_target", "note": "backward plan from a measured 300-kimg recovery time; clock + constant only",
      "schedule": {"type": "principled", "probe": probe(controller="soft_target", ctl={"tau_kimg": 300, "parallel": 4, "total_kimg": 2000})}},
 ]

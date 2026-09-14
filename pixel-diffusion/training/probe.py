@@ -682,6 +682,7 @@ class ProbeController:
         self.n_train = int(cfg.get("n_train", 256))
         self._train = None
         self.hist = []          # per-probe list of per-level dicts (soft_clean, mem_gap, ...)
+        self._recent_full = []  # last few probes' per-level held-out / train MSE (starve rule)
         self.trigger_progress = None
 
         self.t_grid = make_t_grid(self.n_levels)
@@ -781,6 +782,9 @@ class ProbeController:
                         continue
                     self.hist.append([{k: v for k, v in lvl.items() if k in ("t", "soft_clean", "soft_corrupt", "mem_gap")}
                                       for lvl in r.get("probe", {}).get("per_sigma", [])])
+                    self._recent_full.append([{k: v for k, v in lvl.items() if k in ("mse_clean_mean", "mse_train_mean")}
+                                              for lvl in r.get("probe", {}).get("per_sigma", [])])
+            self._recent_full = self._recent_full[-8:]
         except OSError:
             pass
         self.raw_T = float(last.get("T_raw", self.current_T))
@@ -889,6 +893,36 @@ class ProbeController:
             t = min(float(grid[k]) if k < len(grid) else 1.0, t_end)
         return max(t, self.current_T), {"remaining_kimg": remaining, "n_pending": n_pending, "need": int(need)}
 
+    def _starve(self, result):
+        """Data-starvation rule, present-step (control). A level is *starved*
+        when the model keeps getting better on its own 500 clean training faces
+        there while its held-out error has stopped improving: it is memorising,
+        i.e. it has run out of clean data at that level, so blurred data is
+        wanted there. Blur is used where starved and withdrawn elsewhere: T is
+        the lowest level from which at least half of the levels above are
+        starved (no starved level -> T = 1, withdraw everywhere).
+        ctl: window (4), eps_train (rel slope/probe, -0.005), eps_hold (0.005)."""
+        win = int(self.ctl.get("window", 4)); e_tr = float(self.ctl.get("eps_train", -0.005)); e_ho = float(self.ctl.get("eps_hold", 0.005))
+        grid = np.asarray(result["t_grid"])
+        if len(self.hist) < win:
+            return self.current_T, {"reason": "warming up"}
+        x = np.arange(win)
+        def rel_slope(key):
+            S = np.array([[float(l.get(key, np.nan)) for l in rec] for rec in [h for h in self.hist[-win:]]])
+            return np.array([np.polyfit(x, S[:, j], 1)[0] for j in range(S.shape[1])]) / np.maximum(np.abs(S[-1]), 1e-12)
+        # hist stores only soft/mem keys; held-out and train MSE come from the probe log tail
+        S_ho = np.array([[float(l.get("mse_clean_mean", np.nan)) for l in rec] for rec in self._recent_full[-win:]])
+        S_tr = np.array([[float(l.get("mse_train_mean", np.nan)) for l in rec] for rec in self._recent_full[-win:]])
+        s_ho = np.array([np.polyfit(x, S_ho[:, j], 1)[0] for j in range(S_ho.shape[1])]) / np.maximum(S_ho[-1], 1e-12)
+        s_tr = np.array([np.polyfit(x, S_tr[:, j], 1)[0] for j in range(S_tr.shape[1])]) / np.maximum(S_tr[-1], 1e-12)
+        starved = (s_tr < e_tr) & (np.abs(s_ho) < e_ho)
+        t = 1.0
+        for k in range(len(grid)):
+            if starved[k:].mean() >= 0.5:
+                t = float(grid[k]); break
+        return t, {"starved": [bool(v) for v in starved], "slope_train": [float(v) for v in s_tr],
+                   "slope_holdout": [float(v) for v in s_ho]}
+
     def tick(self, progress):
         """Between probes: controllers whose T is a function of progress keep
         moving (the trigger ramp), so the applied T is smooth rather than a
@@ -907,6 +941,9 @@ class ProbeController:
                            probe_seed=self.probe_seed, train_imgs=self._train)
         self.hist.append([{k: v for k, v in lvl.items() if k in ("t", "soft_clean", "soft_corrupt", "mem_gap")}
                           for lvl in result["per_sigma"]])
+        self._recent_full.append([{k: v for k, v in lvl.items() if k in ("mse_clean_mean", "mse_train_mean")}
+                                  for lvl in result["per_sigma"]])
+        self._recent_full = self._recent_full[-8:]
         progress = kimg / total_kimg if total_kimg else 0.0
 
         if self.controller == "boundary":
@@ -917,6 +954,8 @@ class ProbeController:
             t_raw, diag = self._trigger_ramp(result, progress)
         elif self.controller == "soft_target":
             t_raw, diag = self._soft_target(result, progress)
+        elif self.controller == "starve":
+            t_raw, diag = self._starve(result)
         else:
             raise ValueError(f"unknown controller {self.controller!r}")
         prev = self.current_T
