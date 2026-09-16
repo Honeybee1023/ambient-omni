@@ -115,6 +115,41 @@ ROUND4 = [
 ]
 
 
+# Round 5 (2026-09-15): robustness across four settings, one thing changed each time from
+# 500 clean + 26,014 blurred at sigma_b 0.5. Datasets: dataset_creation/create_robustness_datasets.py
+# (rb_c250, rb_c1000, rb_b03, rb_b10). The run's dataset is chosen by DYN_DATASET at launch;
+# the name says which setting it belongs to. Per setting: our rule (backplan), the best
+# hand-set schedule (warmup40), the best static we already measured at that blur level, and
+# for the clean-count settings a clean-only floor. One seed each: at sd 0.00104 only gaps
+# above ~0.003 mean anything, so the question is whether the rule TRACKS the hand-set
+# schedule everywhere, not whether it beats it.
+PHASE5 = "auto5"
+WARMUP40 = {"type": "piecewise", "control_points": [[0.0, 0.0], [0.4, 0.0], [1.0, 0.95]]}
+BACKPLAN_CTL = {"tau_prior": 300, "parallel": 20, "total_kimg": 2000, "t_end": 0.95}
+# Clean-only floor: the blurred bucket parked at T=0.999 (eligible only above sigma 12.28,
+# ~0.066% of draws) rather than a separate dataset, because run_dyn_job.sh always passes a
+# schedule and the sentinel needs one. Same device the parked buckets already use.
+CLEAN_ONLY = {"type": "static", "t_start": 0.999}
+_SETTINGS = {
+    "b03":   [("static0475", 0.475)],
+    "b10":   [("static070", 0.70), ("static085", 0.85)],
+    "c250":  [("static045", 0.45), ("cleanonly", None)],
+    "c1000": [("static045", 0.45), ("cleanonly", None)],
+}
+ROUND5 = []
+for _tag, _statics in _SETTINGS.items():
+    _ds = f"{AMBIENT_BASE}/annotated_datasets/rb_{_tag}"
+    ROUND5.append({"name": f"rb_{_tag}_backplan", "note": f"robustness {_tag}: backward planner (our rule)",
+                   "schedule": {"type": "principled",
+                                "probe": probe(controller="backplan", ctl=dict(BACKPLAN_CTL), train_dir=_ds)}})
+    ROUND5.append({"name": f"rb_{_tag}_warmup40", "note": f"robustness {_tag}: hand-set baseline, T=0 to 40% then linear to 0.95",
+                   "schedule": dict(WARMUP40)})
+    for _sname, _t in _statics:
+        ROUND5.append({"name": f"rb_{_tag}_{_sname}",
+                       "note": f"robustness {_tag}: {'clean-only floor' if _t is None else f'best static T={_t}'}",
+                       "schedule": dict(CLEAN_ONLY) if _t is None else {"type": "static", "t_start": _t}})
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--manifest", default=MANIFEST); ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
@@ -122,11 +157,16 @@ def main():
     for r in ROUND2: r["phase"] = PHASE2
     for r in ROUND3: r["phase"] = PHASE3
     for r in ROUND4: r["phase"] = PHASE4
-    RUNS.extend(ROUND2); RUNS.extend(ROUND3); RUNS.extend(ROUND4)
+    for r in ROUND5: r["phase"] = PHASE5
+    RUNS.extend(ROUND2); RUNS.extend(ROUND3); RUNS.extend(ROUND4); RUNS.extend(ROUND5)
     m = json.load(open(a.manifest)) if os.path.exists(a.manifest) else {"runs": []}
     names = {r["name"] for r in RUNS}
     m["runs"] = [e for e in m.get("runs", []) if e.get("name") not in names] + RUNS
-    for r in RUNS: print(f"  {r['name']:<22} {r['schedule']['probe'].get('controller', r['schedule']['type']):<14} {r['schedule']['probe'].get('ctl', r['schedule'].get('tau_points', r['schedule'].get('control_points')))}")
+    for r in RUNS:
+        sch = r["schedule"]; pr = sch.get("probe") or {}
+        kind = pr.get("controller", sch["type"])
+        detail = pr.get("ctl") or sch.get("tau_points") or sch.get("control_points") or sch.get("t_start")
+        print(f"  {r['name']:<24} {kind:<14} {detail}")
     if a.dry_run: return
     if os.path.exists(a.manifest): shutil.copy2(a.manifest, a.manifest + ".bak")
     json.dump(m, open(a.manifest, "w"), indent=2); print(f"wrote {a.manifest} ({len(m['runs'])} runs)")
