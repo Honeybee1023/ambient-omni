@@ -493,8 +493,16 @@ def training_loop(
                 # this is t_init (0.0 by default: all corrupt data eligible).
                 if hasattr(probe_ctrl, 'tick') and progress >= probe_ctrl.hold_until:
                     probe_ctrl.tick(progress)
-                current_sigma_min = compute_scheduled_sigma_min(
-                    {'type': 'static', 't_start': probe_ctrl.current_T}, progress)
+                if getattr(probe_ctrl, 'controller', '') == 'topdown_live':
+                    # The probe sets the TOP of the blur window, not a threshold: blurred
+                    # images stay eligible below it and are withdrawn from the highest
+                    # noise levels first (see ProbeController._topdown_live).
+                    current_sigma_min = 0.0
+                    current_band_t = probe_ctrl.band_t
+                    current_band_max = topdown_band_sigma(current_band_t)
+                else:
+                    current_sigma_min = compute_scheduled_sigma_min(
+                        {'type': 'static', 't_start': probe_ctrl.current_T}, progress)
             elif t_schedule.get('type') == 'topdown':
                 # Blur eligible at every noise level BELOW the cutoff; the sampler
                 # ANDs the third field on top (see InfiniteSampler). An infinite
@@ -631,7 +639,7 @@ def training_loop(
         fields += [f"reserved {training_stats.report0('Resources/peak_gpu_mem_reserved_gb', torch.cuda.max_memory_reserved(device) / 2**30):<6.2f}"]
         if t_schedule is not None:
             fields += [f"T {progress_t_value:<5.3f}"]
-            if t_schedule.get('type') == 'topdown':
+            if current_band_max != float('inf'):
                 fields += [f"Thi {current_band_t:<5.3f}"]
             fields += [f"corrupt {tick_corrupt_frac:<5.3f}"]
         if probe_ctrl is not None:

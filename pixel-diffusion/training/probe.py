@@ -632,6 +632,42 @@ def all_decisions(result):
     return out
 
 
+def fit_recovery_tau(times, values, tau_grid=None):
+    """Fit s(k) = s_inf - A * exp(-k / tau) to one level's softness after withdrawal.
+
+    times: kimg since blur left this level (>= 0). values: soft_clean at those times.
+    Returns (tau90, tau, s_inf, rss) with tau90 = 2.3026 * tau, the time to close 90% of
+    the gap, or (None, ...) if the series cannot support a fit.
+
+    Why a fit and not "the slope went flat": a flatness test on a probe every 100 kimg can
+    only ever return a multiple of 100 kimg, so the number it reports is the probe cadence
+    (auto_backplan read 100/200/300 for exactly this reason). Given tau, s_inf and A enter
+    linearly, so the fit is a 1-D search with least squares inside it.
+    """
+    t = np.asarray(times, dtype=float); y = np.asarray(values, dtype=float)
+    keep = np.isfinite(t) & np.isfinite(y)
+    t, y = t[keep], y[keep]
+    if len(t) < 4 or t.max() <= 0 or np.ptp(y) <= 0:
+        return None, None, None, None
+    if tau_grid is None:
+        tau_grid = np.exp(np.linspace(np.log(5.0), np.log(800.0), 160))
+    best = None
+    for tau in tau_grid:
+        X = np.column_stack([np.ones_like(t), -np.exp(-t / tau)])   # [s_inf, A]
+        coef, *_ = np.linalg.lstsq(X, y, rcond=None)
+        rss = float(np.sum((X @ coef - y) ** 2))
+        if best is None or rss < best[0]:
+            best = (rss, float(tau), float(coef[0]), float(coef[1]))
+    rss, tau, s_inf, A = best
+    if A <= 0:                      # not a rise: nothing recovered here
+        return None, tau, s_inf, rss
+    # A fit whose time constant sits at the edge of the grid is an extrapolation, not a
+    # measurement: the series is either far too short or has not turned over yet.
+    if tau <= tau_grid[0] * 1.01 or tau >= tau_grid[-1] * 0.99:
+        return None, tau, s_inf, rss
+    return 2.302585 * tau, tau, s_inf, rss
+
+
 # ---------------------------------------------------------------------------
 # closed-loop controller
 
@@ -652,6 +688,12 @@ class ProbeController:
     def __init__(self, cfg, run_dir, device):
         cfg = dict(cfg or {})
         self.every_kimg = float(cfg.get("every_kimg", 100))
+        # Probing densely only where it buys something: a recovery time can never be
+        # measured finer than the probe spacing, so the cadence tightens once blur has
+        # started leaving levels (or past `dense_from_progress`), and stays coarse before.
+        _d = cfg.get("every_kimg_dense")
+        self.every_kimg_dense = float(_d) if _d else None
+        self.dense_from = float(cfg.get("dense_from_progress", 1.0))
         self.n_images = int(cfg.get("n_images", 400))
         self.n_draws = int(cfg.get("n_draws", 2))
         self.batch_size = int(cfg.get("batch_size", 200))
@@ -682,6 +724,9 @@ class ProbeController:
         self.n_train = int(cfg.get("n_train", 256))
         self._train = None
         self.hist = []          # per-probe list of per-level dicts (soft_clean, mem_gap, ...)
+        self.hist_kimg = []     # kimg of each entry in self.hist (recovery fits need the clock)
+        self.band_t = 1.0       # topdown_live: blur eligible at levels BELOW this
+        self.tau_fits = {}      # level index -> fitted tau90 (kimg to close 90% of the gap)
         self._recent_full = []  # last few probes' per-level held-out / train MSE (starve rule)
         self.withdrawn_at = {}  # level index -> kimg at which blur left it (backplan)
         self.tau_seen = {}      # level index -> observed recovery time in kimg
@@ -751,7 +796,7 @@ class ProbeController:
     def due(self, cur_nimg):
         return (cur_nimg / 1000.0) >= self.next_kimg
 
-    def restore(self):
+    def restore(self):   # noqa: C901
         """Recover state after a preemption.
 
         CSAIL jobs get requeued mid-run. Without this a resumed principled run
@@ -775,6 +820,8 @@ class ProbeController:
         self.current_T = float(last.get("T_current",
                                last.get("T_smoothed", last.get("T_raw", self.current_T))))
         self.trigger_progress = last.get("trigger_progress", None)
+        self.band_t = float(last.get("band_t", self.band_t))
+        self.tau_fits = {int(k): float(v) for k, v in (last.get("decision", {}).get("tau_fits") or {}).items()}
         self.withdrawn_at = {int(k): v for k, v in (last.get("withdrawn_at") or {}).items()}
         self.tau_seen = {int(k): v for k, v in (last.get("decision", {}).get("tau_seen") or {}).items()}
         try:
@@ -786,6 +833,8 @@ class ProbeController:
                         continue
                     self.hist.append([{k: v for k, v in lvl.items() if k in ("t", "soft_clean", "soft_corrupt", "mem_gap")}
                                       for lvl in r.get("probe", {}).get("per_sigma", [])])
+                    # the recovery fits need each probe's clock, not just its order
+                    self.hist_kimg.append(float(r.get("kimg", 0.0)))
                     self._recent_full.append([{k: v for k, v in lvl.items() if k in ("mse_clean_mean", "mse_train_mean")}
                                               for lvl in r.get("probe", {}).get("per_sigma", [])])
             self._recent_full = self._recent_full[-8:]
@@ -793,7 +842,11 @@ class ProbeController:
             pass
         self.raw_T = float(last.get("T_raw", self.current_T))
         self.n_probes = int(last.get("probe_index", 0)) + 1
-        self.next_kimg = float(last.get("kimg", 0.0)) + self.every_kimg
+        cadence = self.every_kimg
+        if self.every_kimg_dense and (self.withdrawn_at
+                                      or float(last.get("progress", 0.0)) >= self.dense_from):
+            cadence = self.every_kimg_dense
+        self.next_kimg = float(last.get("kimg", 0.0)) + cadence
         return True
 
     # -- automatic-schedule candidates ---------------------------------------
@@ -986,6 +1039,65 @@ class ProbeController:
                                         "remaining_kimg": remaining, "n_pending": n_pending,
                                         "can_wait": can_wait, "need": int(need)}
 
+    def _topdown_live(self, result, progress, kimg):
+        """Top-down withdrawal with the recovery time measured on this run.
+
+        Blur leaves each noise level tau90(t) kimg before the end, highest level first.
+        That order is what makes the measurement honest: the slow high levels are withdrawn
+        FIRST, so by the time the fast low levels have to be planned, their own neighbours
+        above them have already produced fitted recovery times. (A threshold T withdraws in
+        the opposite order, which is why auto_backplan could only ever measure the fast
+        levels and then apply that number to the slow ones.)
+
+        tau90 per level comes from fit_recovery_tau on the level's softness since its own
+        withdrawal; with two or more fits, log tau90 is regressed on t and used for the
+        levels still pending. Before any fit, `prior_points` are the recovery times measured
+        offline on the look-ahead branches, not tuned on MIND.
+        ctl: prior_points [[t, tau90], ...], total_kimg, tau_min/tau_max (kimg clip),
+        min_points (probes needed before a level is fitted, 4).
+        """
+        c = self.ctl
+        total = float(c.get("total_kimg", 2000))
+        tmin, tmax = float(c.get("tau_min", 50)), float(c.get("tau_max", 800))
+        min_pts = int(c.get("min_points", 4))
+        prior = c.get("prior_points") or [[0.1, 100], [0.3, 100], [0.5, 200], [0.7, 300], [0.9, 300]]
+        pt = np.array([float(p[0]) for p in prior]); pv = np.array([float(p[1]) for p in prior])
+        grid = np.asarray(result["t_grid"])
+
+        for j, t in enumerate(grid):                     # withdrawn = at or above the cutoff
+            if t >= self.band_t - 1e-9 and j not in self.withdrawn_at:
+                self.withdrawn_at[j] = kimg
+        for j, k0 in self.withdrawn_at.items():
+            idx = [i for i, k in enumerate(self.hist_kimg) if k >= k0 - 1e-9]
+            if len(idx) < min_pts:
+                continue
+            ts = [self.hist_kimg[i] - k0 for i in idx]
+            ys = [self.hist[i][j].get("soft_clean", np.nan) for i in idx]
+            tau90, _, _, _ = fit_recovery_tau(ts, ys)
+            if tau90 is not None:
+                self.tau_fits[j] = float(np.clip(tau90, tmin, tmax))
+
+        if len(self.tau_fits) >= 2:                      # log tau90 ~ a + b t, from this run
+            xs = np.array([grid[j] for j in self.tau_fits]); ys = np.log(np.array(list(self.tau_fits.values())))
+            b, a = np.polyfit(xs, ys, 1)
+            tau_of = lambda t: float(np.clip(np.exp(a + b * np.asarray(t)), tmin, tmax))
+            source = "fitted"
+        else:
+            tau_of = lambda t: float(np.clip(np.interp(t, pt, pv), tmin, tmax))
+            source = "prior"
+
+        remaining = max(1.0 - progress, 0.0) * total
+        taus = np.array([tau_of(t) for t in grid])
+        due = taus >= remaining                          # these levels must be withdrawn by now
+        band = float(grid[np.argmax(due)]) if due.any() else 1.0
+        if due.all():
+            band = 0.0
+        band = min(band, self.band_t)                    # withdrawal never reverses
+        return band, {"band_t": band, "remaining_kimg": remaining, "tau_source": source,
+                      "tau_at": {str(t): round(tau_of(t), 1) for t in (0.1, 0.3, 0.5, 0.7, 0.9)},
+                      "tau_fits": {str(k): round(v, 1) for k, v in self.tau_fits.items()},
+                      "withdrawn_at": {str(k): v for k, v in self.withdrawn_at.items()}}
+
     def tick(self, progress):
         """Between probes: controllers whose T is a function of progress keep
         moving (the trigger ramp), so the applied T is smooth rather than a
@@ -1004,6 +1116,7 @@ class ProbeController:
                            probe_seed=self.probe_seed, train_imgs=self._train)
         self.hist.append([{k: v for k, v in lvl.items() if k in ("t", "soft_clean", "soft_corrupt", "mem_gap")}
                           for lvl in result["per_sigma"]])
+        self.hist_kimg.append(kimg)
         self._recent_full.append([{k: v for k, v in lvl.items() if k in ("mse_clean_mean", "mse_train_mean")}
                                   for lvl in result["per_sigma"]])
         self._recent_full = self._recent_full[-8:]
@@ -1021,6 +1134,8 @@ class ProbeController:
             t_raw, diag = self._starve(result)
         elif self.controller == "backplan":
             t_raw, diag = self._backplan(result, progress, kimg)
+        elif self.controller == "topdown_live":
+            t_raw, diag = self._topdown_live(result, progress, kimg)
         else:
             raise ValueError(f"unknown controller {self.controller!r}")
         prev = self.current_T
@@ -1032,8 +1147,15 @@ class ProbeController:
             t_new = max(t_new, prev)
         t_new = float(np.clip(t_new, 0.0, 1.0))
 
+        if self.controller == "topdown_live":
+            # t_raw is the top of the blur window, not a threshold: no EMA, no max_step
+            # (both would blur a cutoff that is already a planned quantity), and T stays 0.
+            t_new = float(np.clip(t_raw, 0.0, 1.0))
+            if apply_to_schedule:
+                self.band_t = t_new
+            self.current_T = 0.0
         self.raw_T = t_raw
-        if apply_to_schedule:
+        if apply_to_schedule and self.controller != "topdown_live":
             self.current_T = t_new
 
         rec = {
@@ -1049,6 +1171,7 @@ class ProbeController:
             # hold is in force. restore() must read this one: keying off
             # T_smoothed would resume a preempted run at a T it never trained at.
             "T_current": self.current_T,
+            "band_t": self.band_t,
             "trigger_progress": self.trigger_progress,
             "withdrawn_at": {str(k): v for k, v in self.withdrawn_at.items()},
             "controller": {"name": self.controller, "ctl": self.ctl,
@@ -1067,5 +1190,8 @@ class ProbeController:
 
         self.n_probes += 1
         self.total_seconds += result["probe_seconds"]
-        self.next_kimg = kimg + self.every_kimg
+        cadence = self.every_kimg
+        if self.every_kimg_dense and (self.withdrawn_at or progress >= self.dense_from):
+            cadence = self.every_kimg_dense
+        self.next_kimg = kimg + cadence
         return rec

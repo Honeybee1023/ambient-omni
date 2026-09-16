@@ -95,13 +95,34 @@ ROUND3 = [
 ]
 
 
+# Round 4 (2026-09-15): measure the recovery time properly instead of reading back the
+# probe spacing. auto_backplan "measured" 100/200/300 kimg, which is 1/2/3 probe intervals.
+# Two changes: probe every 25 kimg once blur starts leaving levels (~+18% wall clock on an
+# A100, ~a third of a GPU-day on top of a 10 h run), and fit an exponential to each level's
+# softness since its own withdrawal rather than testing a 3-probe window for flatness.
+# The controller withdraws TOP-DOWN, which is the order that makes the measurement useful:
+# the slow high levels are withdrawn first, so their fitted recovery times are in hand
+# before the fast low levels have to be planned. Priors are the recovery times measured on
+# the look-ahead branches (tau90: ~100 kimg at t<=0.3, ~200 at 0.5, ~300 at 0.7-0.9),
+# not tuned on MIND. NOT QUEUED: awaiting the user's decision on the remaining GPU time.
+PHASE4 = "auto4"
+ROUND4 = [
+    {"name": "auto_topdown_live", "note": "top-down withdrawal, recovery time fitted per level on this run (dense probing from the first withdrawal)",
+     "schedule": {"type": "principled", "probe": probe(
+         controller="topdown_live", every_kimg=100, every_kimg_dense=25, dense_from_progress=0.65,
+         ctl={"prior_points": [[0.1, 100], [0.3, 100], [0.5, 200], [0.7, 300], [0.9, 300]],
+              "total_kimg": 2000, "tau_min": 50, "tau_max": 800, "min_points": 4})}},
+]
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--manifest", default=MANIFEST); ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     for r in RUNS: r["phase"] = PHASE
     for r in ROUND2: r["phase"] = PHASE2
     for r in ROUND3: r["phase"] = PHASE3
-    RUNS.extend(ROUND2); RUNS.extend(ROUND3)
+    for r in ROUND4: r["phase"] = PHASE4
+    RUNS.extend(ROUND2); RUNS.extend(ROUND3); RUNS.extend(ROUND4)
     m = json.load(open(a.manifest)) if os.path.exists(a.manifest) else {"runs": []}
     names = {r["name"] for r in RUNS}
     m["runs"] = [e for e in m.get("runs", []) if e.get("name") not in names] + RUNS
