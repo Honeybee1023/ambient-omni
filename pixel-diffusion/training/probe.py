@@ -726,6 +726,14 @@ class ProbeController:
         self.hist = []          # per-probe list of per-level dicts (soft_clean, mem_gap, ...)
         self.hist_kimg = []     # kimg of each entry in self.hist (recovery fits need the clock)
         self.band_t = 1.0       # topdown_live: blur eligible at levels BELOW this
+        # Clean-exposure controller state. The training loop keeps these up to date every
+        # tick: they are what the controller steers on, and unlike a distinguishability
+        # reading they MOVE when the schedule moves, which is the whole point.
+        self.n_clean = int(cfg.get("n_clean", 0)) or None   # clean images in this dataset
+        self.observed_clean_kimg = 0.0                      # integral of the clean batch share
+        self.observed_clean_frac = None                     # most recent tick's clean share
+        self.clean_frac_at_zero = None                      # that share while T = 0 (calibration)
+        self.withdraw_kimg = None                           # planned moment blur leaves
         self.tau_fits = {}      # level index -> fitted tau90 (kimg to close 90% of the gap)
         self._recent_full = []  # last few probes' per-level held-out / train MSE (starve rule)
         self.withdrawn_at = {}  # level index -> kimg at which blur left it (backplan)
@@ -821,6 +829,9 @@ class ProbeController:
                                last.get("T_smoothed", last.get("T_raw", self.current_T))))
         self.trigger_progress = last.get("trigger_progress", None)
         self.band_t = float(last.get("band_t", self.band_t))
+        self.observed_clean_kimg = float(last.get("observed_clean_kimg", 0.0))
+        _wk = last.get("withdraw_kimg")
+        self.withdraw_kimg = float(_wk) if _wk is not None else None
         self.tau_fits = {int(k): float(v) for k, v in (last.get("decision", {}).get("tau_fits") or {}).items()}
         self.withdrawn_at = {int(k): v for k, v in (last.get("withdrawn_at") or {}).items()}
         self.tau_seen = {int(k): v for k, v in (last.get("decision", {}).get("tau_seen") or {}).items()}
@@ -1039,6 +1050,68 @@ class ProbeController:
                                         "remaining_kimg": remaining, "n_pending": n_pending,
                                         "can_wait": can_wait, "need": int(need)}
 
+    def _exposure(self, result, progress, kimg):
+        """Withdraw blur when the projected CLEAN EXPOSURE hits its target.
+
+        The mechanism this steers on, measured on the existing table rather than assumed:
+        clean exposure (the integral of the clean share of the batch) predicts the end-of-run
+        memorisation gap at rank 0.97; above ~1800 passes over the clean set it correlates
+        +0.73 with a worse score and below that -0.16; the best runs sit at 1000-1660 passes.
+        Scaling that band by the clean-set size predicted which schedule wins at 250, 500 and
+        1000 clean faces, out of sample, 3 for 3.
+
+        So: project total clean exposure to the end of training as a function of when blur is
+        withdrawn, and pick the withdrawal time that lands on the target. Withdrawing raises
+        the clean share (the batch becomes mostly clean), so the projection is
+            E_total(k_w) = E_now + a (k_w - k) + f_hi (K - k_w)
+        with `a` the clean share observed while blur is in use and `f_hi` the share after
+        withdrawal. Both are measured on this run, not assumed. Solving for E_total = E* gives
+        the withdrawal time, recomputed every probe, so an error in the projection corrects
+        itself as the run goes.
+
+        Two constants, both with stated origins and neither tuned on this run:
+          target_epochs  1259, the median of the base table's top eight (a calibrated scalar);
+          tau_rec        300 kimg, the recovery time measured on the look-ahead branches.
+        Where they conflict the recovery floor wins: too little recovery is catastrophic
+        (0.032+ when a level gets under 200 kimg), overshooting the exposure band is graded.
+
+        ctl: target_epochs, tau_rec, total_kimg, t_end (0.95), f_hi (fallback 0.96 if the
+        run has not yet observed the post-withdrawal share), shape ('jump' or 'ramp').
+        """
+        c = self.ctl
+        total = float(c.get("total_kimg", 2000)); t_end = float(c.get("t_end", 0.95))
+        tau_rec = float(c.get("tau_rec", 300)); target_epochs = float(c.get("target_epochs", 1259))
+        n_clean = self.n_clean or int(c.get("n_clean", 500))
+        a = self.clean_frac_at_zero if self.clean_frac_at_zero is not None else 0.019
+        f_hi = float(c.get("f_hi", 0.96))
+        if self.observed_clean_frac is not None and self.current_T >= t_end - 1e-9:
+            f_hi = float(self.observed_clean_frac)          # measured once withdrawal happened
+        target_kimg = target_epochs * n_clean / 1000.0      # clean exposure we are aiming at
+        E_now = float(self.observed_clean_kimg)
+
+        denom = a - f_hi
+        if abs(denom) < 1e-6:
+            k_w = total - tau_rec
+        else:
+            k_w = (target_kimg - E_now + a * kimg - f_hi * total) / denom
+        k_w_raw = k_w
+        k_w = min(k_w, total - tau_rec)                     # recovery floor wins
+        k_w = max(k_w, kimg if self.withdraw_kimg is None else min(self.withdraw_kimg, k_w))
+        self.withdraw_kimg = float(k_w)
+        t = t_end if kimg >= k_w - 1e-9 else 0.0
+        if c.get("shape") == "ramp" and kimg >= k_w - 1e-9:
+            span = max(total - k_w, 1e-9)
+            t = t_end * float(np.clip((kimg - k_w) / span, 0.0, 1.0))
+        t = max(t, self.current_T)                          # withdrawal never reverses
+        proj = E_now + a * max(k_w - kimg, 0.0) + f_hi * max(total - k_w, 0.0)
+        return t, {"clean_kimg_so_far": E_now, "clean_epochs_so_far": E_now * 1000.0 / n_clean,
+                   "target_clean_kimg": target_kimg, "target_epochs": target_epochs,
+                   "n_clean": n_clean, "a_clean_frac": a, "f_hi": f_hi,
+                   "withdraw_kimg": self.withdraw_kimg, "withdraw_kimg_unclipped": k_w_raw,
+                   "recovery_floor_binding": bool(k_w_raw > total - tau_rec),
+                   "projected_total_clean_kimg": proj,
+                   "projected_total_epochs": proj * 1000.0 / n_clean}
+
     def _topdown_live(self, result, progress, kimg):
         """Top-down withdrawal with the recovery time measured on this run.
 
@@ -1102,6 +1175,19 @@ class ProbeController:
         """Between probes: controllers whose T is a function of progress keep
         moving (the trigger ramp), so the applied T is smooth rather than a
         staircase at the probe cadence."""
+        if self.controller == "exposure" and self.withdraw_kimg is not None:
+            # The withdrawal moment is a kimg, not a probe index: applying it at the tick it
+            # falls on keeps the plan from quantising to the probe cadence (the failure that
+            # made auto_backplan's "measurements" multiples of its probe spacing).
+            total = float(self.ctl.get("total_kimg", 2000)); t_end = float(self.ctl.get("t_end", 0.95))
+            kimg = progress * total
+            if kimg >= self.withdraw_kimg - 1e-9:
+                if self.ctl.get("shape") == "ramp":
+                    span = max(total - self.withdraw_kimg, 1e-9)
+                    self.current_T = max(self.current_T,
+                                         t_end * float(np.clip((kimg - self.withdraw_kimg) / span, 0.0, 1.0)))
+                else:
+                    self.current_T = max(self.current_T, t_end)
         if self.controller == "trigger_ramp" and self.trigger_progress is not None:
             self.current_T = float(np.clip(self.ramp_T(progress, float(self.ctl.get("t_end", 0.95))), 0.0, 1.0))
 
@@ -1136,6 +1222,8 @@ class ProbeController:
             t_raw, diag = self._backplan(result, progress, kimg)
         elif self.controller == "topdown_live":
             t_raw, diag = self._topdown_live(result, progress, kimg)
+        elif self.controller == "exposure":
+            t_raw, diag = self._exposure(result, progress, kimg)
         else:
             raise ValueError(f"unknown controller {self.controller!r}")
         prev = self.current_T
@@ -1172,6 +1260,8 @@ class ProbeController:
             # T_smoothed would resume a preempted run at a T it never trained at.
             "T_current": self.current_T,
             "band_t": self.band_t,
+            "observed_clean_kimg": self.observed_clean_kimg,
+            "withdraw_kimg": self.withdraw_kimg,
             "trigger_progress": self.trigger_progress,
             "withdrawn_at": {str(k): v for k, v in self.withdrawn_at.items()},
             "controller": {"name": self.controller, "ctl": self.ctl,

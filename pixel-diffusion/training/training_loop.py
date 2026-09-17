@@ -436,6 +436,14 @@ def training_loop(
             f'{len(sentinel_filenames)} images carry the sigma_min=999 sentinel but no '
             '--t_schedule was provided. Refusing to train: these images would be unusable.'
         )
+    # Clean exposure: how much of the batch has been clean images, integrated over training.
+    # The exposure controller steers on this, so it is measured from the batches actually drawn
+    # rather than predicted from T -- the prefetch lag and the sampler's own rejection put the
+    # analytic share several points off (measured 0.054 at T=0, not 0.019).
+    n_clean_images = sum(1 for fname, ann in annotations.items()
+                         if ann[0] == 0.0 and fname not in sentinel_filenames)
+    cum_clean_kimg = 0.0
+    last_exposure_nimg = cur_nimg
     last_scheduled_sigma_min = None
     current_sigma_min = 0.0
     current_band_max = float('inf')   # top-down schedules only; inf = no upper cutoff
@@ -453,9 +461,12 @@ def training_loop(
     # already know is good and record what the probe would have said.
     probe_ctrl = None
     probe_cfg = t_schedule.get('probe') if isinstance(t_schedule, dict) else None
+    dist.print0(f'Clean images in this dataset: {n_clean_images}')
     if probe_cfg is not None:
         from training.probe import ProbeController
         probe_ctrl = ProbeController(probe_cfg, run_dir, device)
+        if probe_ctrl.n_clean is None:
+            probe_ctrl.n_clean = n_clean_images
         if probe_ctrl.restore():
             dist.print0(f'Probe: resumed after {probe_ctrl.n_probes} probes, '
                         f'T={probe_ctrl.current_T:.3f}, next at {probe_ctrl.next_kimg:.0f} kimg')
@@ -625,6 +636,21 @@ def training_loop(
         # Print status line, accumulating the same information in training_stats.
         tick_end_time = time.time()
         tick_corrupt_frac = (tick_corrupt_seen / tick_batch_seen) if tick_batch_seen else float('nan')
+        # The first ticks are unusable for this: the DataLoader prefetches thousands of images
+        # under the previous annotations, so tick 0 reports corrupt 0.000 whatever the schedule
+        # says. Counting them would credit the run with ~50 kimg of clean exposure it never had
+        # -- on a 400-kimg total that is a tenth of the control variable.
+        if probe_ctrl is not None and tick_batch_seen and np.isfinite(tick_corrupt_frac) and cur_tick >= 2:
+            _clean_frac = 1.0 - tick_corrupt_frac
+            cum_clean_kimg += _clean_frac * (cur_nimg - last_exposure_nimg) / 1000.0
+            probe_ctrl.observed_clean_kimg = cum_clean_kimg
+            probe_ctrl.observed_clean_frac = _clean_frac
+            if progress_t_value <= 1e-6:
+                # the clean share while blur is still in use, i.e. the controller's `a`
+                probe_ctrl.clean_frac_at_zero = _clean_frac
+        if cur_tick < 2:
+            last_exposure_nimg = cur_nimg     # skipped span, not credited either way
+        last_exposure_nimg = cur_nimg
         tick_corrupt_seen = 0
         tick_batch_seen = 0
         fields = []
@@ -649,6 +675,10 @@ def training_loop(
             fields += [f"probes {probe_ctrl.n_probes:<3d}"]
             fields += [f"Traw {probe_ctrl.raw_T:<5.3f}"]
             fields += [f"probe_ovh {100 * share:<4.1f}%"]
+            if probe_ctrl.controller == "exposure":
+                fields += [f"cleanep {cum_clean_kimg * 1000.0 / max(n_clean_images, 1):<6.0f}"]
+                if probe_ctrl.withdraw_kimg is not None:
+                    fields += [f"drop@ {probe_ctrl.withdraw_kimg:<6.0f}"]
         torch.cuda.reset_peak_memory_stats()
         dist.print0(' '.join(fields))
 

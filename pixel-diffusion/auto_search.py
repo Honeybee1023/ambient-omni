@@ -150,6 +150,37 @@ for _tag, _statics in _SETTINGS.items():
                        "schedule": dict(CLEAN_ONLY) if _t is None else {"type": "static", "t_start": _t}})
 
 
+# Round 6 (2026-09-16): the clean-exposure controller, across all five settings.
+# Control variable = clean exposure (the integral of the clean share of the batch), because it
+# is the quantity that (a) predicts the end-of-run memorisation gap at rank 0.97 on our own
+# table, and (b) actually moves when the schedule moves -- the property every earlier signal
+# lacked. Two constants, both stated: target_epochs 1259 = the median of the base table's top
+# eight (a calibrated scalar, from the 500-clean table only), and tau_rec 300 kimg = the
+# recovery time measured on the look-ahead branches. The recovery floor wins any conflict.
+# The dataset is chosen per run at launch (DYN_DATASET); the name says which setting.
+PHASE6 = "auto6"
+# target_epochs: the median MEASURED clean exposure of the eight best base-setting runs
+# (1109 passes over the clean set; the band runs ~1000-1600, with 707 too little at 0.0349 and
+# 1954 too much at 0.0346). Measured from the logged batch composition with the DataLoader's
+# prefetch ticks excluded, i.e. in the same units the controller accumulates at run time.
+# ONE calibrated scalar, taken from the base setting only and applied unchanged everywhere.
+# f_hi: the clean share after full withdrawal, measured at 0.94 across those runs; the run
+# replaces it with its own observation once it has withdrawn. tau_rec: 300 kimg, the recovery
+# time measured on the look-ahead branches.
+EXPOSURE_CTL = {"target_epochs": 1109, "tau_rec": 300, "total_kimg": 2000, "t_end": 0.95,
+                "f_hi": 0.94, "shape": "jump"}
+_EXP_SETTINGS = {"base": "celeba_dynamic_t_v2_b0b5", "c250": "rb_c250", "c1000": "rb_c1000",
+                 "b03": "rb_b03", "b10": "rb_b10"}
+ROUND6 = [
+    {"name": f"exp_{_tag}", "note": f"clean-exposure controller, setting {_tag}",
+     "setting": _tag,
+     "schedule": {"type": "principled",
+                  "probe": probe(controller="exposure", ctl=dict(EXPOSURE_CTL), every_kimg=200,
+                                 train_dir=f"{AMBIENT_BASE}/annotated_datasets/{_ds}")}}
+    for _tag, _ds in _EXP_SETTINGS.items()
+]
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--manifest", default=MANIFEST); ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
@@ -158,7 +189,8 @@ def main():
     for r in ROUND3: r["phase"] = PHASE3
     for r in ROUND4: r["phase"] = PHASE4
     for r in ROUND5: r["phase"] = PHASE5
-    RUNS.extend(ROUND2); RUNS.extend(ROUND3); RUNS.extend(ROUND4); RUNS.extend(ROUND5)
+    for r in ROUND6: r["phase"] = PHASE6
+    RUNS.extend(ROUND2); RUNS.extend(ROUND3); RUNS.extend(ROUND4); RUNS.extend(ROUND5); RUNS.extend(ROUND6)
     m = json.load(open(a.manifest)) if os.path.exists(a.manifest) else {"runs": []}
     names = {r["name"] for r in RUNS}
     m["runs"] = [e for e in m.get("runs", []) if e.get("name") not in names] + RUNS
