@@ -58,8 +58,16 @@ def main():
     dec = [r for r in recs if isinstance(r.get("decision"), dict) and "withdraw_kimg" in r["decision"]]
     if not dec:
         sys.exit("not an exposure run: no withdraw_kimg in any probe decision")
+    # The plan must be judged at the moment it was ACTED ON. Once blur has been withdrawn the
+    # controller keeps re-solving from a much larger accumulated exposure, so the last probe's
+    # withdraw_kimg is a stale re-solve (it drifts to the recovery floor), not the decision the
+    # run made. Use the last probe before withdrawal for the plan checks, and the last probe of
+    # all for the exposure outcome.
+    pre = [r for r in dec if float(r.get("T_current", 0.0)) < 0.5]
+    plan_rec = pre[-1] if pre else dec[0]
     last, first = dec[-1], dec[0]
-    d = last["decision"]
+    d = plan_rec["decision"]
+    d_end = last["decision"]
     total = 2000.0
     ok = True
 
@@ -71,9 +79,10 @@ def main():
                 f"observed a {d['a_clean_frac']:.4f} vs n_clean/n_total {d['n_clean']/26514.0:.4f}")
 
     # 3. the decisive one: recompute the choice from the run's own observed constants
-    aa, f_hi = first["decision"]["a_clean_frac"], d["f_hi"]
+    aa, f_hi = d["a_clean_frac"], d["f_hi"]
     tgt = d["target_clean_kimg"]
-    solved = (tgt - 0.0 + aa * 0.0 - f_hi * total) / (aa - f_hi)
+    k_at = float(plan_rec["kimg"]); E_at = float(d["clean_kimg_so_far"])
+    solved = (tgt - E_at + aa * k_at - f_hi * total) / (aa - f_hi)
     floor = total - float(d.get("tau_rec", 300))
     expected = min(solved, floor)
     ok &= check("drop time equals the closed form from its own constants",
@@ -84,7 +93,7 @@ def main():
                     abs(d["withdraw_kimg"] - a.expect_drop) <= a.tol_kimg,
                     f"chose {d['withdraw_kimg']:.0f}, predicted {a.expect_drop:.0f}")
 
-    plans = [r["decision"]["withdraw_kimg"] for r in dec if r["decision"].get("withdraw_kimg")]
+    plans = [r["decision"]["withdraw_kimg"] for r in pre if r["decision"].get("withdraw_kimg")] or [d["withdraw_kimg"]]
     ok &= check("plan stable across probes", (max(plans) - min(plans)) <= 150.0,
                 f"range {min(plans):.0f}-{max(plans):.0f} over {len(plans)} probes")
 
@@ -96,7 +105,7 @@ def main():
                 f"corrupt {before[-1][1]:.3f} before -> {after[0][1]:.3f} after" if after and before else "n/a")
 
     E_meas = measured_exposure(ticks)
-    ok &= check("final exposure matches the projection",
+    ok &= check("final exposure matches the projection made when it dropped",
                 abs(E_meas - d["projected_total_clean_kimg"]) / max(d["projected_total_clean_kimg"], 1e-9) < 0.15,
                 f"measured {E_meas:.0f} kimg, projected {d['projected_total_clean_kimg']:.0f}")
     ep = E_meas * 1000.0 / d["n_clean"]
