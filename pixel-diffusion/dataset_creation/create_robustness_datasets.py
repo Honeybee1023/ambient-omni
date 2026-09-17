@@ -10,6 +10,10 @@ everything else identical, so a schedule's number can be compared across setting
                                                                made clean from raw; see below)
     rb_b03     500 clean   + the SAME 26,014 source images blurred at 0.3
     rb_b10     500 clean   + the SAME 26,014 source images blurred at 1.0
+    rb_c250b10 250 clean   + the SAME 26,014 source images blurred at 1.0  (the corner where
+               scarce clean data and heavy blur meet: the exposure target wants a late drop and
+               the recovery floor caps it at 300 kimg, a figure measured at blur 0.5 where
+               recovery is about twice as fast. Predicted failure case, built to be measured.)
 
 The blurred sets for 0.3 and 1.0 are regenerated from raw for the b5 index list rather than
 borrowed from buckets b3/b7, which hold different subsets of images: reusing them would change
@@ -130,12 +134,12 @@ def main():
             json.dump({"source_bucket": "b1", "sigma": 0.0, "n": len(extra), "raw_ids": extra}, f)
         build("rb_c1000", base_clean + extra_clean, base_b5)
 
-    for name, sigma in (("rb_b03", 0.3), ("rb_b10", 1.0)):
+    for name, sigma, n_clean in (("rb_b03", 0.3, 500), ("rb_b10", 1.0, 500), ("rb_c250b10", 1.0, 250)):
         if not want(name):
             continue
         d = make_images(b5, sigma, os.path.join(IMG_ROOT, f"blur{str(sigma).replace('.','')}"), "b5")
         blurred = [(os.path.join(d, f"b5_{r}.jpg"), f"b5_{r}.jpg") for r in b5]
-        build(name, base_clean, blurred)
+        build(name, base_clean[:n_clean], blurred)
 
 
 if __name__ == "__main__":

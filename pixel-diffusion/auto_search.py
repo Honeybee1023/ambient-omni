@@ -169,7 +169,13 @@ PHASE6 = "auto6"
 # time measured on the look-ahead branches.
 EXPOSURE_CTL = {"target_epochs": 1109, "tau_rec": 300, "total_kimg": 2000, "t_end": 0.95,
                 "f_hi": 0.94, "shape": "jump"}
-_EXP_SETTINGS = {"base": "celeba_dynamic_t_v2_b0b5", "c250": "rb_c250", "c1000": "rb_c1000",
+# The base dataset is called celeba_dynamic_t_v2_b0b5 on lysine and celeba_dynamic_t_v2 on
+# proline (same 26,514-image b0+b5 content, different name). Resolve it per machine: a manifest
+# entry naming a directory this cluster does not have would fail the probe at load time, after
+# the job had taken a card.
+BASE_DATASET = next((_n for _n in ("celeba_dynamic_t_v2_b0b5", "celeba_dynamic_t_v2")
+                     if os.path.isdir(f"{AMBIENT_BASE}/annotated_datasets/{_n}")), "celeba_dynamic_t_v2")
+_EXP_SETTINGS = {"base": BASE_DATASET, "c250": "rb_c250", "c1000": "rb_c1000",
                  "b03": "rb_b03", "b10": "rb_b10"}
 ROUND6 = [
     {"name": f"exp_{_tag}", "note": f"clean-exposure controller, setting {_tag}",
@@ -178,6 +184,53 @@ ROUND6 = [
                   "probe": probe(controller="exposure", ctl=dict(EXPOSURE_CTL), every_kimg=200,
                                  train_dir=f"{AMBIENT_BASE}/annotated_datasets/{_ds}")}}
     for _tag, _ds in _EXP_SETTINGS.items()
+]
+
+
+# Round 7 (2026-09-17): the two tests that attack the rule's untested assumptions.
+#
+# (1) BUDGET. Every result so far is a 2000-kimg run, and the target is expressed in passes over
+# the clean set, so it should transfer to another length -- that is an assumption, not a result.
+# At 1000 kimg the same target forces a MUCH earlier drop (~42% of training) than the ~72% the
+# 2000-kimg runs chose, so a "withdraw at about 70%" reading of our results predicts something
+# different and the two are separated by one run. total_kimg is threaded into the controller's
+# projection and its recovery floor; the job must also be launched with the shorter duration
+# (run_budget_job.sh), since run_dyn_job.sh hardcodes 2000.
+#
+# (2) CORNER. Few clean images AND heavy blur, the one combination the robustness grid lacks.
+# Here the exposure target wants a drop past the floor, so the floor binds and fixes blur-free
+# time at 300 kimg -- a value measured at blur 0.5, where recovery runs about twice as fast as
+# the blur-1.0 run showed. This is where I expect the rule to under-recover; it is registered as
+# a predicted failure, and the prediction is in the log before it runs.
+PHASE7 = "auto7"
+_K1000 = dict(EXPOSURE_CTL); _K1000.update({"total_kimg": 1000})
+ROUND7 = [
+    # --- budget test, base setting, 1000 kimg
+    {"name": "exp_base_k1000", "note": "budget test: clean-exposure controller at a 1000-kimg budget",
+     "setting": "base_k1000", "total_kimg": 1000,
+     "schedule": {"type": "principled",
+                  "probe": probe(controller="exposure", ctl=dict(_K1000), every_kimg=100,
+                                 train_dir=f"{AMBIENT_BASE}/annotated_datasets/{BASE_DATASET}")}},
+    {"name": "hand_warmup40_k1000", "note": "budget test baseline: T=0 to 40% then linear to 0.95, at 1000 kimg",
+     "setting": "base_k1000", "total_kimg": 1000, "schedule": dict(WARMUP40)},
+    {"name": "hand_static045_k1000", "note": "budget test baseline: best static T=0.45, at 1000 kimg",
+     "setting": "base_k1000", "total_kimg": 1000, "schedule": {"type": "static", "t_start": 0.45}},
+    # optional fourth arm: the "withdraw at ~70%" reading of our 2000-kimg results, at this budget
+    {"name": "hand_drop70_k1000", "note": "budget test contrast: jump to 0.95 at 70% of a 1000-kimg run",
+     "setting": "base_k1000", "total_kimg": 1000,
+     "schedule": {"type": "piecewise", "control_points": [[0.0, 0.0], [0.7, 0.0], [0.7, 0.95], [1.0, 0.95]]}},
+    # --- failure corner, 250 clean at blur 1.0, 2000 kimg
+    {"name": "exp_c250b10", "note": "failure corner: clean-exposure controller, 250 clean at blur 1.0",
+     "setting": "c250b10",
+     "schedule": {"type": "principled",
+                  "probe": probe(controller="exposure", ctl=dict(EXPOSURE_CTL), every_kimg=200,
+                                 train_dir=f"{AMBIENT_BASE}/annotated_datasets/rb_c250b10")}},
+    {"name": "rb_c250b10_warmup40", "note": "failure corner baseline: warmup40", "setting": "c250b10",
+     "schedule": dict(WARMUP40)},
+    {"name": "rb_c250b10_static070", "note": "failure corner baseline: static T=0.70", "setting": "c250b10",
+     "schedule": {"type": "static", "t_start": 0.70}},
+    {"name": "rb_c250b10_static085", "note": "failure corner baseline: static T=0.85 (run whichever wins at 500 clean)",
+     "setting": "c250b10", "schedule": {"type": "static", "t_start": 0.85}},
 ]
 
 
@@ -190,7 +243,8 @@ def main():
     for r in ROUND4: r["phase"] = PHASE4
     for r in ROUND5: r["phase"] = PHASE5
     for r in ROUND6: r["phase"] = PHASE6
-    RUNS.extend(ROUND2); RUNS.extend(ROUND3); RUNS.extend(ROUND4); RUNS.extend(ROUND5); RUNS.extend(ROUND6)
+    for r in ROUND7: r["phase"] = PHASE7
+    RUNS.extend(ROUND2); RUNS.extend(ROUND3); RUNS.extend(ROUND4); RUNS.extend(ROUND5); RUNS.extend(ROUND6); RUNS.extend(ROUND7)
     m = json.load(open(a.manifest)) if os.path.exists(a.manifest) else {"runs": []}
     names = {r["name"] for r in RUNS}
     m["runs"] = [e for e in m.get("runs", []) if e.get("name") not in names] + RUNS
