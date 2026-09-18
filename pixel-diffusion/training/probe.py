@@ -1085,12 +1085,34 @@ class ProbeController:
         a = self.clean_frac_at_zero if self.clean_frac_at_zero is not None else 0.019
         f_hi = float(c.get("f_hi", 0.96))
         if self.observed_clean_frac is not None and self.current_T >= t_end - 1e-9:
-            f_hi = float(self.observed_clean_frac)          # measured once withdrawal happened
+            # Only believe a post-withdrawal reading that actually looks post-withdrawal. The tick
+            # straight after the drop still carries prefetched batches built under the old
+            # threshold, so it reports the OLD clean share; taking it made f_hi = 0.046 against
+            # a = 0.045 on exp_c1250, and the solve below divides by (a - f_hi).
+            if float(self.observed_clean_frac) > a + 0.2:
+                f_hi = float(self.observed_clean_frac)
         target_kimg = target_epochs * n_clean / 1000.0      # clean exposure we are aiming at
         E_now = float(self.observed_clean_kimg)
 
+        # Once blur is gone the plan is history: re-solving from the post-drop exposure answers a
+        # question nobody asked ("when should I withdraw, given I already have?") and its answer
+        # wanders. Freeze it, so the logged field keeps meaning the decision the run made.
+        if self.withdraw_kimg is not None and self.current_T >= t_end - 1e-9:
+            proj_done = E_now + f_hi * max(total - kimg, 0.0)
+            return max(self.current_T, t_end), {
+                "clean_kimg_so_far": E_now, "clean_epochs_so_far": E_now * 1000.0 / n_clean,
+                "target_clean_kimg": target_kimg, "target_epochs": target_epochs,
+                "n_clean": n_clean, "a_clean_frac": a, "f_hi": f_hi,
+                "withdraw_kimg": self.withdraw_kimg, "withdraw_kimg_unclipped": self.withdraw_kimg,
+                "recovery_floor_binding": bool(self.withdraw_kimg >= total - tau_rec - 1e-9),
+                "projected_total_clean_kimg": proj_done,
+                "projected_total_epochs": proj_done * 1000.0 / n_clean,
+                "plan_frozen": True, "tau_rec": tau_rec}
+
         denom = a - f_hi
-        if abs(denom) < 1e-6:
+        # A denominator this small means the two shares are indistinguishable, which happens only
+        # when a reading is wrong -- dividing by it produces a plan of millions of kimg.
+        if abs(denom) < 0.05:
             k_w = total - tau_rec
         else:
             k_w = (target_kimg - E_now + a * kimg - f_hi * total) / denom
@@ -1109,7 +1131,7 @@ class ProbeController:
                    "n_clean": n_clean, "a_clean_frac": a, "f_hi": f_hi,
                    "withdraw_kimg": self.withdraw_kimg, "withdraw_kimg_unclipped": k_w_raw,
                    "recovery_floor_binding": bool(k_w_raw > total - tau_rec),
-                   "projected_total_clean_kimg": proj,
+                   "projected_total_clean_kimg": proj, "plan_frozen": False, "tau_rec": tau_rec,
                    "projected_total_epochs": proj * 1000.0 / n_clean}
 
     def _topdown_live(self, result, progress, kimg):

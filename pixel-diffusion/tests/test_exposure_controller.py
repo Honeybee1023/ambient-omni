@@ -73,8 +73,19 @@ def main():
     ok &= check("plan does not drift earlier without cause", later <= planned + 1e-6,
                 f"{planned:.0f} -> {later:.0f}")
     c = Ctl(500, T=0.95, planned=1300.0)
-    t, _ = _exposure(c, {"t_grid": []}, 1500 / TOTAL, 1500.0)
+    t, d = _exposure(c, {"t_grid": []}, 1500 / TOTAL, 1500.0)
     ok &= check("withdrawal never reverses", t >= 0.95 - 1e-9, f"T={t}")
+    # after the drop the plan is history and must stop moving (it used to wander, and once
+    # produced -1412644 when a lag tick made the two clean shares equal)
+    ok &= check("plan frozen after withdrawal", d.get("plan_frozen") and abs(d["withdraw_kimg"] - 1300.0) < 1e-6,
+                f"reported {d['withdraw_kimg']:.0f}, frozen={d.get('plan_frozen')}")
+    c = Ctl(500, T=0.95, planned=1300.0); c.observed_clean_frac = 0.046   # the lag-tick reading
+    _, d = _exposure(c, {"t_grid": []}, 1500 / TOTAL, 1500.0)
+    ok &= check("a lag-tick clean share is not believed as f_hi", d["f_hi"] > 0.5, f"f_hi={d['f_hi']:.3f}")
+    c = Ctl(500); c.clean_frac_at_zero = 0.93                            # near-singular solve
+    _, d = _exposure(c, {"t_grid": []}, 0.0, 0.0)
+    ok &= check("near-singular solve falls back to the floor, not millions",
+                abs(d["withdraw_kimg"] - (TOTAL - TAU)) < 1e-6, f"plan {d['withdraw_kimg']:.0f}")
     print("ALL PASS" if ok else "SOME FAILED"); sys.exit(0 if ok else 1)
 
 
