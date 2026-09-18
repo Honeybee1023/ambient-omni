@@ -8,6 +8,10 @@ everything else identical, so a schedule's number can be compared across setting
                                                                a strict subset of the base clean set)
     rb_c1000   1000 clean  + the same 26,014 blurred at 0.5   (the 500 b0 files plus 500 more,
                                                                made clean from raw; see below)
+    rb_c1250   1250 clean  + the same 26,014 blurred at 0.5   (the crossover test: the analysis
+                                                               puts the point where blurred data
+                                                               stops being worth anything at
+                                                               ~1150-1250 clean images)
     rb_b03     500 clean   + the SAME 26,014 source images blurred at 0.3
     rb_b10     500 clean   + the SAME 26,014 source images blurred at 1.0
     rb_c250b10 250 clean   + the SAME 26,014 source images blurred at 1.0  (the corner where
@@ -121,18 +125,27 @@ def main():
     if want("rb_c250"):
         build("rb_c250", base_clean[:250], base_b5)
 
-    if want("rb_c1000"):
-        extra = b1[:500]
+    def extra_clean_faces(n_extra):
+        """n_extra clean faces beyond the 500, taken in order from bucket b1 (sigma_b 0.1), which
+        no run has ever trained on, processed at sigma 0. Refuses on any overlap with the MIND
+        holdout. rb_c1000 uses the first 500 of this same series and rb_c1250 the first 750, so
+        the larger set is a superset of the smaller one."""
+        extra = b1[:n_extra]
         clash = [r for r in extra if (r.lstrip("0") or "0") in hold]
         print(f"  extra clean from b1: {len(extra)} ids, first {extra[0]}, last {extra[-1]}, "
               f"in holdout: {len(clash)}")
         if clash:
             sys.exit(f"REFUSING: {len(clash)} of the extra clean faces are in the MIND holdout")
         d = make_images(extra, 0.0, os.path.join(IMG_ROOT, "extra_clean"), "b0")
-        extra_clean = [(os.path.join(d, f"b0_{r}.jpg"), f"b0_{r}.jpg") for r in extra]
-        with open(os.path.join(IMG_ROOT, "extra_clean_ids.json"), "w") as f:
+        with open(os.path.join(IMG_ROOT, f"extra_clean_ids_{n_extra}.json"), "w") as f:
             json.dump({"source_bucket": "b1", "sigma": 0.0, "n": len(extra), "raw_ids": extra}, f)
-        build("rb_c1000", base_clean + extra_clean, base_b5)
+        return [(os.path.join(d, f"b0_{r}.jpg"), f"b0_{r}.jpg") for r in extra]
+
+    if want("rb_c1000"):
+        build("rb_c1000", base_clean + extra_clean_faces(500), base_b5)
+
+    if want("rb_c1250"):
+        build("rb_c1250", base_clean + extra_clean_faces(750), base_b5)
 
     for name, sigma, n_clean in (("rb_b03", 0.3, 500), ("rb_b10", 1.0, 500), ("rb_c250b10", 1.0, 250)):
         if not want(name):

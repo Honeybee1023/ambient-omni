@@ -234,6 +234,29 @@ ROUND7 = [
 ]
 
 
+# Round 8 (2026-09-18): the crossover test the analysis asks for.
+# From the clean-only ladder (0.05467 at 250 clean, 0.04479 at 500, 0.03073 at 1000) against a
+# schedule floor of ~0.0274-0.0287, blurred data stops being worth anything at roughly 1150-1250
+# clean images. At 1250 the prediction is that clean-only MATCHES the schedules, i.e. our method
+# has no advantage left -- a bound on the method's domain, run deliberately to find its edge.
+# Dataset rb_c1250 (lysine only): the 500 b0 faces + 750 more made clean from bucket b1, which no
+# run has trained on, + the same 26,014 blurred at 0.5.
+PHASE8 = "auto8"
+ROUND8 = [
+    {"name": "exp_c1250", "note": "crossover test: clean-exposure controller at 1250 clean faces",
+     "setting": "c1250",
+     "schedule": {"type": "principled",
+                  "probe": probe(controller="exposure", ctl=dict(EXPOSURE_CTL), every_kimg=200,
+                                 train_dir=f"{AMBIENT_BASE}/annotated_datasets/rb_c1250")}},
+    {"name": "rb_c1250_warmup40", "note": "crossover test baseline: warmup40", "setting": "c1250",
+     "schedule": dict(WARMUP40)},
+    {"name": "rb_c1250_static045", "note": "crossover test baseline: best static T=0.45", "setting": "c1250",
+     "schedule": {"type": "static", "t_start": 0.45}},
+    {"name": "rb_c1250_cleanonly", "note": "crossover test: clean-only floor at 1250 clean faces",
+     "setting": "c1250", "schedule": dict(CLEAN_ONLY)},
+]
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--manifest", default=MANIFEST); ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
@@ -244,7 +267,8 @@ def main():
     for r in ROUND5: r["phase"] = PHASE5
     for r in ROUND6: r["phase"] = PHASE6
     for r in ROUND7: r["phase"] = PHASE7
-    RUNS.extend(ROUND2); RUNS.extend(ROUND3); RUNS.extend(ROUND4); RUNS.extend(ROUND5); RUNS.extend(ROUND6); RUNS.extend(ROUND7)
+    for r in ROUND8: r["phase"] = PHASE8
+    RUNS.extend(ROUND2); RUNS.extend(ROUND3); RUNS.extend(ROUND4); RUNS.extend(ROUND5); RUNS.extend(ROUND6); RUNS.extend(ROUND7); RUNS.extend(ROUND8)
     m = json.load(open(a.manifest)) if os.path.exists(a.manifest) else {"runs": []}
     names = {r["name"] for r in RUNS}
     m["runs"] = [e for e in m.get("runs", []) if e.get("name") not in names] + RUNS
