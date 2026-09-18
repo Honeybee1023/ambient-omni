@@ -257,6 +257,35 @@ ROUND8 = [
 ]
 
 
+# Round 9 (2026-09-18): two cheap tests against the user's open problems.
+#
+# ITEM 4 -- the ending threshold was inherited, never chosen. T_end = 0.95 is where the ~94%
+# post-drop clean share comes from. Low endings are tested and bad; 0.95 against 1.0 was never run.
+# With blur excluded entirely after the drop the post-drop clean share rises to ~0.98, so the
+# controller re-solves its own withdrawal time (later, ~1463 kimg) rather than keeping 1439.
+#
+# ITEM 1 -- circularity. The target was calibrated on eight FINISHED runs; anyone who can afford
+# eight finished runs does not need the method. These four arms calibrate it instead on SHORT runs:
+# fixed drop fractions at a 1000-kimg budget spanning ~400 to ~1500 passes over the clean set, which
+# brackets the calibrated 1109. If the optimum located from four half-length runs agrees with the
+# one calibrated from eight full ones, the constant can be obtained cheaply and the circularity
+# objection loses most of its force. Launch via run_budget_job.sh with 1000.
+PHASE9 = "auto9"
+_END100 = dict(EXPOSURE_CTL); _END100.update({"t_end": 1.0, "f_hi": 0.98})
+ROUND9 = [
+    {"name": "exp_base_end100", "note": "item 4: same rule, blur excluded entirely after the drop (T_end 1.0 rather than 0.95)",
+     "setting": "base", "schedule": {"type": "principled",
+                  "probe": probe(controller="exposure", ctl=dict(_END100), every_kimg=200,
+                                 train_dir=f"{AMBIENT_BASE}/annotated_datasets/{BASE_DATASET}")}},
+]
+for _frac in (0.2, 0.4, 0.6, 0.8):
+    ROUND9.append({"name": f"cal_k1000_drop{int(_frac*100):02d}",
+                   "note": f"item 1: short-run calibration arm, jump to 0.95 at {int(_frac*100)}% of a 1000-kimg run",
+                   "setting": "base_k1000", "total_kimg": 1000,
+                   "schedule": {"type": "piecewise",
+                                "control_points": [[0.0, 0.0], [_frac, 0.0], [_frac, 0.95], [1.0, 0.95]]}})
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--manifest", default=MANIFEST); ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
@@ -268,7 +297,8 @@ def main():
     for r in ROUND6: r["phase"] = PHASE6
     for r in ROUND7: r["phase"] = PHASE7
     for r in ROUND8: r["phase"] = PHASE8
-    RUNS.extend(ROUND2); RUNS.extend(ROUND3); RUNS.extend(ROUND4); RUNS.extend(ROUND5); RUNS.extend(ROUND6); RUNS.extend(ROUND7); RUNS.extend(ROUND8)
+    for r in ROUND9: r["phase"] = PHASE9
+    RUNS.extend(ROUND2); RUNS.extend(ROUND3); RUNS.extend(ROUND4); RUNS.extend(ROUND5); RUNS.extend(ROUND6); RUNS.extend(ROUND7); RUNS.extend(ROUND8); RUNS.extend(ROUND9)
     m = json.load(open(a.manifest)) if os.path.exists(a.manifest) else {"runs": []}
     names = {r["name"] for r in RUNS}
     m["runs"] = [e for e in m.get("runs", []) if e.get("name") not in names] + RUNS
