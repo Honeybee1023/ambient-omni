@@ -286,6 +286,32 @@ for _frac in (0.2, 0.4, 0.6, 0.8):
                                 "control_points": [[0.0, 0.0], [_frac, 0.0], [_frac, 0.95], [1.0, 0.95]]}})
 
 
+# Round 10 (2026-09-18): the corruption-axis boundary, and the missing case.
+#
+# The fine-detail LEVEL (not its slope) is an early, clean measurement of corruption severity: at
+# 200 kimg it reads 0.435 / 0.289 / 0.142 of the truth's at blur 0.3 / 0.5 / 1.0, and it is nearly
+# blind to clean count (spread 0.01 across 250-1250 clean). It does NOT predict the score across
+# schedules within a setting -- the apparent correlation there is the restrictive-early confound
+# (level@500k vs T@500k: rho 0.90).
+#
+# So it cannot trigger a withdrawal, but it does measure the axis our rule ignores. To use it in a
+# two-sided rule we need MIND per unit of deficit, and that constant is NOT estimable from what we
+# have: within a setting the deficit barely varies, and across settings MIND is not comparable.
+# It becomes estimable only where the quality term dominates, which we have never measured.
+# rb_b20 (blur 2.0) is that case: blur should be worth nothing, so a rule that keeps using it for
+# 1437 kimg should LOSE to clean-only (0.0448, already measured and valid at any blur level).
+PHASE10 = "auto10"
+ROUND10 = [
+    {"name": "exp_b20", "note": "corruption boundary: the rule at blur 2.0, where blur should be worthless",
+     "setting": "b20",
+     "schedule": {"type": "principled",
+                  "probe": probe(controller="exposure", ctl=dict(EXPOSURE_CTL), every_kimg=200,
+                                 train_dir=f"{AMBIENT_BASE}/annotated_datasets/rb_b20")}},
+    {"name": "rb_b20_warmup40", "note": "corruption boundary baseline: warmup40 at blur 2.0",
+     "setting": "b20", "schedule": dict(WARMUP40)},
+]
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--manifest", default=MANIFEST); ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
@@ -298,7 +324,8 @@ def main():
     for r in ROUND7: r["phase"] = PHASE7
     for r in ROUND8: r["phase"] = PHASE8
     for r in ROUND9: r["phase"] = PHASE9
-    RUNS.extend(ROUND2); RUNS.extend(ROUND3); RUNS.extend(ROUND4); RUNS.extend(ROUND5); RUNS.extend(ROUND6); RUNS.extend(ROUND7); RUNS.extend(ROUND8); RUNS.extend(ROUND9)
+    for r in ROUND10: r["phase"] = PHASE10
+    RUNS.extend(ROUND2); RUNS.extend(ROUND3); RUNS.extend(ROUND4); RUNS.extend(ROUND5); RUNS.extend(ROUND6); RUNS.extend(ROUND7); RUNS.extend(ROUND8); RUNS.extend(ROUND9); RUNS.extend(ROUND10)
     m = json.load(open(a.manifest)) if os.path.exists(a.manifest) else {"runs": []}
     names = {r["name"] for r in RUNS}
     m["runs"] = [e for e in m.get("runs", []) if e.get("name") not in names] + RUNS

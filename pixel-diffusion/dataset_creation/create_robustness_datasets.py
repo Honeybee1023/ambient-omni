@@ -14,6 +14,11 @@ everything else identical, so a schedule's number can be compared across setting
                                                                ~1150-1250 clean images)
     rb_b03     500 clean   + the SAME 26,014 source images blurred at 0.3
     rb_b10     500 clean   + the SAME 26,014 source images blurred at 1.0
+    rb_b20     500 clean   + the SAME 26,014 source images blurred at 2.0  (the corruption-axis
+               boundary: at 200 kimg the model's fine detail reads 0.435 / 0.289 / 0.142 of the
+               truth's at blur 0.3 / 0.5 / 1.0, so at 2.0 it should be near 0.05-0.10 and the
+               blurred data should be worth nothing. This is the case where quality cost should
+               finally outweigh the memorisation benefit -- we have never measured one.)
     rb_c250b10 250 clean   + the SAME 26,014 source images blurred at 1.0  (the corner where
                scarce clean data and heavy blur meet: the exposure target wants a late drop and
                the recovery floor caps it at 300 kimg, a figure measured at blur 0.5 where
@@ -147,7 +152,8 @@ def main():
     if want("rb_c1250"):
         build("rb_c1250", base_clean + extra_clean_faces(750), base_b5)
 
-    for name, sigma, n_clean in (("rb_b03", 0.3, 500), ("rb_b10", 1.0, 500), ("rb_c250b10", 1.0, 250)):
+    for name, sigma, n_clean in (("rb_b03", 0.3, 500), ("rb_b10", 1.0, 500), ("rb_c250b10", 1.0, 250),
+                                 ("rb_b20", 2.0, 500)):
         if not want(name):
             continue
         d = make_images(b5, sigma, os.path.join(IMG_ROOT, f"blur{str(sigma).replace('.','')}"), "b5")
