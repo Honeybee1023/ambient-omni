@@ -40,7 +40,14 @@ AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or next(
 import argparse, json, os, shutil
 MANIFEST = f"{AMBIENT_BASE}/generated/dyn_search_manifest.json"
 PHASE = "auto1"
-TRAIN_DIR = f"{AMBIENT_BASE}/annotated_datasets/" + os.environ.get("DYN_DATASET", "celeba_dynamic_t_v2")
+# The base dataset has different names on the two clusters: celeba_dynamic_t_v2_b0b5 on lysine,
+# celeba_dynamic_t_v2 on proline (same 26,514-image b0+b5 content). Defaulting to the proline name
+# put a non-existent path into every lysine entry whose probe did not set train_dir explicitly,
+# which is what killed the jump-at-75% replicate with a FileNotFoundError. Resolve it against the
+# filesystem, and let DYN_DATASET override when a run wants a different dataset entirely.
+BASE_DATASET = next((_n for _n in ("celeba_dynamic_t_v2_b0b5", "celeba_dynamic_t_v2")
+                     if os.path.isdir(f"{AMBIENT_BASE}/annotated_datasets/{_n}")), "celeba_dynamic_t_v2")
+TRAIN_DIR = f"{AMBIENT_BASE}/annotated_datasets/" + os.environ.get("DYN_DATASET", BASE_DATASET)
 
 BASE = {"every_kimg": 100, "n_images": 160, "n_draws": 2, "n_levels": 20, "batch_size": 80,
         "probe_seed": 12345, "alpha": 1.0, "monotone": False, "t_init": 0.0,
@@ -185,12 +192,6 @@ PHASE6 = "auto6"
 # time measured on the look-ahead branches.
 EXPOSURE_CTL = {"target_epochs": 1109, "tau_rec": 300, "total_kimg": 2000, "t_end": 0.95,
                 "f_hi": 0.94, "shape": "jump"}
-# The base dataset is called celeba_dynamic_t_v2_b0b5 on lysine and celeba_dynamic_t_v2 on
-# proline (same 26,514-image b0+b5 content, different name). Resolve it per machine: a manifest
-# entry naming a directory this cluster does not have would fail the probe at load time, after
-# the job had taken a card.
-BASE_DATASET = next((_n for _n in ("celeba_dynamic_t_v2_b0b5", "celeba_dynamic_t_v2")
-                     if os.path.isdir(f"{AMBIENT_BASE}/annotated_datasets/{_n}")), "celeba_dynamic_t_v2")
 _EXP_SETTINGS = {"base": BASE_DATASET, "c250": "rb_c250", "c1000": "rb_c1000",
                  "b03": "rb_b03", "b10": "rb_b10"}
 ROUND6 = [
