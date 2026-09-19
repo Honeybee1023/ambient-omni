@@ -49,6 +49,22 @@ BASE = {"every_kimg": 100, "n_images": 160, "n_draws": 2, "n_levels": 20, "batch
 def probe(**kw):
     c = dict(BASE); c.update(kw); return c
 
+
+def log_probe(dataset):
+    """A probe that only LOGS: no controller drives it, because the schedule it rides on is not
+    'principled'. It records the same 20-level fine-detail and memorisation traces the controller
+    runs produce, at ~3% of wall clock.
+
+    Why baselines need it: without a baseline's trace we can only compare the rule against itself.
+    That is exactly what stopped us checking the under-recovery forecast on the 250-clean/blur-1.0
+    corner -- the rule's trace existed, its baselines' did not, so 'why did it win' could not be
+    answered from logs. FUTURE BASELINE ENTRIES SHOULD TAKE THIS BY DEFAULT.
+
+    Not applied retroactively: a manifest entry is read when the job launches, so editing one that
+    is already queued or running would change what that run does.
+    """
+    return probe(every_kimg=200, train_dir=f"{AMBIENT_BASE}/annotated_datasets/{dataset}")
+
 RUNS = [
     {"name": "auto_soft_slope", "note": "bottleneck: withdraw a level when its fine-band energy stops improving under blur",
      "schedule": {"type": "principled", "probe": probe(controller="soft_slope", ctl={"window": 4, "eps": 0.002}, max_step=0.1)}},
@@ -229,8 +245,9 @@ ROUND7 = [
      "schedule": dict(WARMUP40)},
     {"name": "rb_c250b10_static070", "note": "failure corner baseline: static T=0.70", "setting": "c250b10",
      "schedule": {"type": "static", "t_start": 0.70}},
-    {"name": "rb_c250b10_static085", "note": "failure corner baseline: static T=0.85 (run whichever wins at 500 clean)",
-     "setting": "c250b10", "schedule": {"type": "static", "t_start": 0.85}},
+    {"name": "rb_c250b10_static085", "note": "failure corner baseline: static T=0.85 (run whichever wins at 500 clean); carries a logging-only probe",
+     "setting": "c250b10", "schedule": {"type": "static", "t_start": 0.85,
+                                        "probe": log_probe("rb_c250b10")}},
 ]
 
 
