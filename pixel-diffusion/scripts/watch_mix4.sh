@@ -1,0 +1,32 @@
+#!/bin/bash
+# Mac-side watcher for the mixed-blur go/no-go study on CSAIL. Polls every 10 min and EXITS
+# (which wakes the session that launched it) as soon as something needs attention:
+#   - a new MIND result (mind_dyn_mix4_*.json) appears
+#   - a job log shows a Traceback / ERROR
+#   - the classifier reaches its final snapshot
+#   - heartbeat: 6 hours with no event, so a stall is noticed too
+# State (what was already reported) lives in $STATE so a re-launch only reports new events.
+STATE=${STATE:-$HOME/ambient-omni-private-notes/.watch_mix4_state}
+touch "$STATE"
+start=$(date +%s)
+while true; do
+    snap=$(ssh -o ConnectTimeout=30 csail-slurm '
+        B=/data/scratch/honjar
+        for f in $B/generated/mind_dyn_mix4_*.json; do [ -f "$f" ] && echo "RESULT $(basename $f)"; done
+        for f in $B/train_logs/dyn_search/mix4_*.out $B/train_logs/mix4/cls_mix4-*.out; do
+            [ -f "$f" ] && grep -q -E "Traceback|^ERROR" "$f" && echo "ERROR $(basename $f)"; done
+        [ -f $B/train_outputs/cls_mix4/network-snapshot-007680.pkl ] && echo "CLS_DONE"
+        squeue -h -u honjar -o "QUEUED %j"
+    ' 2>/dev/null) || { sleep 600; continue; }
+    new=$(echo "$snap" | grep -E "^(RESULT|ERROR|CLS_DONE)" | grep -v -x -F -f "$STATE")
+    if [ -n "$new" ]; then
+        echo "$new" >> "$STATE"
+        echo "EVENT at $(date):"; echo "$new"
+        echo "--- queue:"; echo "$snap" | grep ^QUEUED
+        exit 0
+    fi
+    if [ $(( $(date +%s) - start )) -ge 21600 ]; then
+        echo "HEARTBEAT at $(date): no new event in 6h"; echo "$snap" | grep ^QUEUED; exit 0
+    fi
+    sleep 600
+done
