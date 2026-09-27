@@ -125,6 +125,46 @@ def compute_scheduled_sigma_min(t_schedule, progress):
     return t_to_sigma(t_val)
 
 
+PER_GROUP_OFF_SIGMA = 999.0   # the sentinel: never eligible at any sampled sigma
+
+
+def group_of(fname):
+    """Group key of a dataset file: the filename prefix before the first underscore
+    (b0_000100.jpg -> 'b0', g10_004512.png -> 'g10')."""
+    return fname.split('_', 1)[0]
+
+
+def per_group_state(spec, progress):
+    """State of one group under a `per_group` schedule at training progress [0,1].
+
+    A group spec is exactly one of
+      {"control_points": [[frac, T], ...]}   piecewise-linear T, as the global 'piecewise'
+      {"phases": [[frac, value], ...]}       step function; value holds from its frac until
+                                             the next phase's frac. value is a number T,
+                                             "annot" (the image's own annotation from the
+                                             dataset file, e.g. Ambient-o's classifier) or
+                                             "off" (never eligible).
+    Returns ('T', sigma_min) | ('annot', None) | ('off', None).
+    """
+    if ('control_points' in spec) == ('phases' in spec):
+        raise ValueError(f"per_group spec needs exactly one of control_points/phases: {spec}")
+    if 'control_points' in spec:
+        return ('T', compute_scheduled_sigma_min({'type': 'piecewise', 'control_points': spec['control_points']}, progress))
+    phases = spec['phases']
+    fracs = [float(p[0]) for p in phases]
+    if not phases or fracs[0] > 0.0 or any(b < a for a, b in zip(fracs, fracs[1:])):
+        raise ValueError(f"per_group phases must start at 0 and be sorted, got {fracs}")
+    value = phases[0][1]
+    for frac, v in phases:
+        if progress >= float(frac):
+            value = v
+    if value == 'annot':
+        return ('annot', None)
+    if value == 'off':
+        return ('off', None)
+    return ('T', compute_scheduled_sigma_min({'type': 'static', 't_start': float(value)}, progress))
+
+
 def compute_topdown_band(t_schedule, progress):
     """Top-down withdrawal: blurred images are eligible only BELOW an upper noise cutoff.
 
@@ -412,7 +452,36 @@ def training_loop(
     corrupt_filenames = set()
     # Indexed rather than destructured: restricted-bucket annotations are 3-tuples.
     sentinel_filenames = {fname for fname, ann in annotations.items() if ann[0] >= 900}
-    if t_schedule is not None:
+    # per_group: every group (filename prefix) listed in the schedule follows its own
+    # curve or phases; files outside the listed groups (the clean images) are untouched.
+    group_files, group_orig, group_last = {}, {}, {}
+    is_per_group = isinstance(t_schedule, dict) and t_schedule.get('type') == 'per_group'
+    if is_per_group:
+        groups = t_schedule.get('groups') or {}
+        if not groups:
+            raise ValueError("per_group t_schedule needs a non-empty 'groups' dict")
+        if any(len(ann) > 2 for ann in annotations.values()):
+            raise ValueError('per_group cannot be combined with restricted-bucket annotations (sigma_band_max).')
+        for fname, ann in annotations.items():
+            g = group_of(fname)
+            if g in groups:
+                group_files.setdefault(g, []).append(fname)
+                group_orig[fname] = ann[0]
+        for g, spec in groups.items():
+            if g not in group_files:
+                raise ValueError(f"per_group group '{g}' matches no file in the dataset")
+            uses_annot = any(p[1] == 'annot' for p in spec.get('phases', []))
+            if uses_annot and any(group_orig[f] >= 900 for f in group_files[g]):
+                raise ValueError(f"group '{g}' asks for 'annot' but its files carry the 999 sentinel, "
+                                 "not a real annotation")
+            per_group_state(spec, 0.0)   # validate the spec before training starts
+        corrupt_filenames = set(group_orig)
+        stray = sentinel_filenames - corrupt_filenames
+        if stray:
+            raise ValueError(f'{len(stray)} sentinel images belong to no scheduled group and would be unusable')
+        dist.print0(f'per_group schedule over {len(groups)} groups: '
+                    + ', '.join(f'{g}={len(group_files[g])}' for g in sorted(group_files)))
+    elif t_schedule is not None:
         # The schedule rewrites annotations as plain (sigma_min, 0.0) pairs below, which
         # would silently drop any band and turn a restricted bucket back into an
         # overlapping one. Refuse rather than train something other than what was asked.
@@ -441,7 +510,8 @@ def training_loop(
     # rather than predicted from T -- the prefetch lag and the sampler's own rejection put the
     # analytic share several points off (measured 0.054 at T=0, not 0.019).
     n_clean_images = sum(1 for fname, ann in annotations.items()
-                         if ann[0] == 0.0 and fname not in sentinel_filenames)
+                         if ann[0] == 0.0 and fname not in sentinel_filenames
+                         and fname not in corrupt_filenames)
     cum_clean_kimg = 0.0
     last_exposure_nimg = cur_nimg
     last_scheduled_sigma_min = None
@@ -499,7 +569,29 @@ def training_loop(
                     f"({'driving' if driving else 'logging only'}, "
                     f"{rec['probe']['probe_seconds']:.1f}s)")
 
-            if t_schedule.get('type') == 'principled':
+            if is_per_group:
+                numeric_T = []
+                for g, spec in t_schedule['groups'].items():
+                    state = per_group_state(spec, progress)
+                    if state[0] == 'T':
+                        numeric_T.append(sigma_min_to_t(state[1]))
+                    elif state[0] == 'off':
+                        numeric_T.append(1.0)
+                    if state == group_last.get(g):
+                        continue
+                    for fname in group_files[g]:
+                        s = (state[1] if state[0] == 'T' else
+                             group_orig[fname] if state[0] == 'annot' else PER_GROUP_OFF_SIGMA)
+                        annotations[fname] = (s, 0.0)
+                        dataset_obj.annotations[fname] = (s, 0.0)
+                    group_last[g] = state
+                    dist.print0(f'per_group {g}: {state[0]}'
+                                + (f' T={sigma_min_to_t(state[1]):.3f}' if state[0] == 'T' else '')
+                                + f' at {cur_nimg / 1e3:.1f} kimg')
+                # Logged T: mean over groups with a number (off counts as 1); nan if all 'annot'.
+                progress_t_value = float(np.mean(numeric_T)) if numeric_T else float('nan')
+                current_sigma_min = float('nan')
+            elif t_schedule.get('type') == 'principled':
                 # The probe fills in for the schedule; before the first probe
                 # this is t_init (0.0 by default: all corrupt data eligible).
                 if hasattr(probe_ctrl, 'tick') and progress >= probe_ctrl.hold_until:
@@ -523,8 +615,10 @@ def training_loop(
                 current_band_max = topdown_band_sigma(current_band_t)
             else:
                 current_sigma_min = compute_scheduled_sigma_min(t_schedule, progress)
-            progress_t_value = sigma_min_to_t(current_sigma_min)
-            if current_sigma_min != last_scheduled_sigma_min or current_band_max != last_band_max:
+            if not is_per_group:   # per_group wrote its own groups above
+                progress_t_value = sigma_min_to_t(current_sigma_min)
+            if not is_per_group and (current_sigma_min != last_scheduled_sigma_min
+                                     or current_band_max != last_band_max):
                 ann = ((current_sigma_min, 0.0) if current_band_max == float('inf')
                        else (current_sigma_min, 0.0, current_band_max))
                 for fname in corrupt_filenames:
