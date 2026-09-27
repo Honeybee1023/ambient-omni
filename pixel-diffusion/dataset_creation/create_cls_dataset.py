@@ -57,6 +57,8 @@ def main():
                     help="existing dataset dir under annotated_datasets holding b0_*/b5_* files")
     ap.add_argument("--name", default="celeba_cls_paired")
     ap.add_argument("--blur_sigma", type=float, default=0.5, help="b5 is 0.5; larger values are controls")
+    ap.add_argument("--blur_sigmas", default=None,
+                    help="comma-separated, e.g. 0.3,0.5,1.0,2.0: a MIXED-corruption classifier. Each face\n                         then appears once blurred at every level and once clean per level (clean\n                         copies are extra symlinks), so classes stay balanced and identity stays useless.")
     args = ap.parse_args()
 
     src = os.path.join(AMBIENT_BASE, "annotated_datasets", args.src)
@@ -76,10 +78,33 @@ def main():
         raise SystemExit(f"expected {CLEAN_PREFIX}* files in {src}")
 
     annotations, labels = [], []
+    n_faces = len(clean)
 
     def add(name, label):
         annotations.append({"filename": name, "sigma_min": 0.0, "sigma_max": 0.0})
         labels.append({"image_file": name, "label": label})
+
+    if args.blur_sigmas:
+        levels = [float(x) for x in args.blur_sigmas.split(",") if x]
+        for f in clean:
+            src_path = os.path.realpath(os.path.join(src, f))
+            arr0 = np.array(Image.open(src_path).convert("RGB"), dtype=np.float32)
+            for k, s_b in enumerate(levels):
+                # clean replica k (the first is the original name)
+                cname = f if k == 0 else f.replace(CLEAN_PREFIX, f"b0r{k}_", 1)
+                cp = os.path.join(out, cname)
+                if not os.path.lexists(cp):
+                    os.symlink(src_path, cp)
+                add(cname, 0)
+                # the same face blurred at level k, same recipe as the buckets
+                bname = f.replace(CLEAN_PREFIX, f"bl{round(s_b * 100):03d}self_", 1).replace(".jpg", ".png")
+                bp = os.path.join(out, bname)
+                if not os.path.exists(bp):
+                    arr = gaussian_filter(arr0, sigma=(s_b, s_b, 0))
+                    Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8)).save(bp)
+                add(bname, 1)
+        BLUR_SIGMA = levels
+        clean = []   # handled above; skip the single-level loop
 
     for f in clean:
         # clean copy: symlink to the training file
@@ -108,7 +133,7 @@ def main():
     n0 = sum(1 for l in labels if l["label"] == 0)
     n1 = len(labels) - n0
     print(f"{out}")
-    print(f"  clean   (label 0): {n0:>6}   (the {len(clean)} training faces)")
+    print(f"  clean   (label 0): {n0:>6}   (the {n_faces} training faces)")
     print(f"  blurred (label 1): {n1:>6}   (the SAME faces, blurred sigma={BLUR_SIGMA})")
     print(f"  all sigma_min = 0 -> both classes eligible at every noise level")
     print(f"  labels: {labels_path}")

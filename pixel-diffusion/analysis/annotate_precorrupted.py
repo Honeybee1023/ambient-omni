@@ -79,9 +79,12 @@ def main():
                          "confident classifier can never fall below the confusion threshold before the grid ends.")
     ap.add_argument("--clean_prefix", default=DEFAULT_CLEAN_PREFIX)
     ap.add_argument("--corrupt_prefix", default=DEFAULT_CORRUPT_PREFIX,
-                    help="e.g. bX_ for a directory of held-out faces blurred at a control strength")
+                    help="e.g. bX_ for a directory of held-out faces blurred at a control strength; comma-separate several (g03_,g05_,g10_,g20_)")
     args = ap.parse_args()
-    CLEAN_PREFIX, CORRUPT_PREFIX = args.clean_prefix, args.corrupt_prefix
+    # Comma-separated prefixes annotate several blur groups in one pass (g03_,g05_,...);
+    # str.startswith takes a tuple, so a single prefix behaves exactly as before.
+    CLEAN_PREFIX = args.clean_prefix
+    CORRUPT_PREFIX = tuple(p for p in args.corrupt_prefix.split(",") if p)
     if args.cls_ema_window is None:
         args.cls_ema_window = max(1, round(32 * args.num_sigmas / 2048))
         print(f"EMA window scaled to the {args.num_sigmas}-point grid: {args.cls_ema_window}")
