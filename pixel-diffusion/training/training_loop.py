@@ -454,7 +454,7 @@ def training_loop(
     sentinel_filenames = {fname for fname, ann in annotations.items() if ann[0] >= 900}
     # per_group: every group (filename prefix) listed in the schedule follows its own
     # curve or phases; files outside the listed groups (the clean images) are untouched.
-    group_files, group_orig, group_last = {}, {}, {}
+    group_files, group_orig, group_last, group_logged = {}, {}, {}, {}
     is_per_group = isinstance(t_schedule, dict) and t_schedule.get('type') == 'per_group'
     if is_per_group:
         groups = t_schedule.get('groups') or {}
@@ -585,9 +585,16 @@ def training_loop(
                         annotations[fname] = (s, 0.0)
                         dataset_obj.annotations[fname] = (s, 0.0)
                     group_last[g] = state
-                    dist.print0(f'per_group {g}: {state[0]}'
-                                + (f' T={sigma_min_to_t(state[1]):.3f}' if state[0] == 'T' else '')
-                                + f' at {cur_nimg / 1e3:.1f} kimg')
+                    # A ramp changes T every iteration; log only a change of mode or a move of
+                    # >= 0.05 in T since the last logged value, not every step.
+                    t_now = sigma_min_to_t(state[1]) if state[0] == 'T' else None
+                    logged = group_logged.get(g)
+                    if (logged is None or logged[0] != state[0]
+                            or (t_now is not None and abs(t_now - logged[1]) >= 0.05)):
+                        group_logged[g] = (state[0], t_now)
+                        dist.print0(f'per_group {g}: {state[0]}'
+                                    + (f' T={t_now:.3f}' if t_now is not None else '')
+                                    + f' at {cur_nimg / 1e3:.1f} kimg')
                 # Logged T: mean over groups with a number (off counts as 1); nan if all 'annot'.
                 progress_t_value = float(np.mean(numeric_T)) if numeric_T else float('nan')
                 current_sigma_min = float('nan')
