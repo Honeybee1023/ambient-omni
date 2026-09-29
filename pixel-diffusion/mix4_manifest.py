@@ -89,6 +89,14 @@ AMBO_ARMS = [
 ]
 ARMS = ARMS + [dict(a, dataset="celeba_mix4_ambo") for a in AMBO_ARMS]
 
+# --- Dataloops (baseline 8): loop 1 of the official recipe. dataloops_restore.py restores every
+# blurred image with the loop-0 model (mix4_ambo) from its sigma_tn to zero and labels it at
+# sigma_tn/8; loop 1 trains a NEW model from scratch on that set with those labels fixed.
+# Annotations are plain sigmas, so no --cls_ema_window is needed.  DYN_DATASET=celeba_mix4_loop1
+ARMS = ARMS + [{"name": "mix4_dataloops1", "dataset": "celeba_mix4_loop1",
+                "schedule": same({"phases": [[0, "annot"]]}),
+                "note": "baseline 8: Ambient Dataloops loop 1 (restore sigma_tn -> 0, label sigma_tn/8, retrain)"}]
+
 
 def main():
     if "--list" in sys.argv:
