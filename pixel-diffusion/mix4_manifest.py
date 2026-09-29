@@ -73,6 +73,23 @@ ARMS = [
 ]
 
 
+# --- Ambient-o arms: dataset celeba_mix4_ambo (per-image classifier annotations, paper recipe).
+# Submit with  DYN_DATASET=celeba_mix4_ambo TRAIN_EXTRA=--cls_ema_window=1  because the annotation
+# used a 64-point sigma grid, where train.py's default window of 32 (meant for 2048 points) would
+# smooth over half the grid. Switch fractions match the middle fine-tune arm (75%).
+AMBO_ARMS = [
+    {"name": "mix4_ambo", "schedule": same({"phases": [[0, "annot"]]}),
+     "note": "baseline 3: Ambient-o, per-image classifier thresholds, fixed for the run"},
+    {"name": "mix4_ambo_then_clean", "schedule": same({"phases": [[0, "annot"], [0.75, "off"]]}),
+     "note": "baseline 5: Ambient-o thresholds, then clean only from 75%"},
+    {"name": "mix4_all_then_ambo", "schedule": same({"phases": [[0, 0.0], [0.75, "annot"]]}),
+     "note": "baseline 6: all data at every noise level, then Ambient-o thresholds from 75%"},
+    {"name": "mix4_all_ambo_clean", "schedule": same({"phases": [[0, 0.0], [0.40, "annot"], [0.75, "off"]]}),
+     "note": "baseline 7: all data, Ambient-o thresholds from 40%, clean only from 75%"},
+]
+ARMS = ARMS + [dict(a, dataset="celeba_mix4_ambo") for a in AMBO_ARMS]
+
+
 def main():
     if "--list" in sys.argv:
         for a in ARMS:
@@ -82,7 +99,7 @@ def main():
     have = {r["name"]: r for r in m["runs"]}
     added = 0
     for a in ARMS:
-        entry = dict(a, study="mix4", dataset="celeba_mix4_v1")
+        entry = dict({"dataset": "celeba_mix4_v1"}, **a, study="mix4")
         if a["name"] in have:
             if have[a["name"]].get("schedule") != a["schedule"]:
                 sys.exit(f"{a['name']} already in the manifest with a DIFFERENT schedule; refusing")

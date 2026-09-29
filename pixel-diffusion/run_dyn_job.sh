@@ -123,6 +123,7 @@ print(json.dumps(r[0]['schedule'],separators=(',',':')))
 
 echo "=== $NAME | GPU $GPU_ID (slot $SLOT) | seed $TRAIN_SEED | $(date) ==="
 echo "    schedule: $SCHEDULE"
+[ -n "${TRAIN_EXTRA:-}" ] && echo "    extra train.py args: $TRAIN_EXTRA"
 echo "    checkpoint every $((DUMP_TICKS * 50)) kimg (snap=$SNAP_TICKS dump=$DUMP_TICKS)"
 echo "    dataset: $DATA ($(wc -l < "$DATA/annotations.jsonl" 2>/dev/null || echo '?') annotations)"
 if [ "$GPU_ID" = "slurm" ]; then
@@ -150,7 +151,7 @@ if [ ! -f "$CKPT" ]; then
         --snap=$SNAP_TICKS --dump=$DUMP_TICKS \
         --corruption_probability=0.0 --noise_config=identity --s_max=4 \
         --cache=False --duration=2 --seed=$TRAIN_SEED --workers=8 \
-        --t_schedule="$SCHEDULE" $RESUME
+        --t_schedule="$SCHEDULE" $RESUME ${TRAIN_EXTRA:-}
     if [ $? -ne 0 ]; then echo "ERROR: training failed for $NAME"; exit 1; fi
 fi
 
