@@ -38,11 +38,16 @@ for run in "$@"; do
     if squeue -h -u "$(whoami)" -n "dyn_${run}" -o "%i" 2>/dev/null | grep -q .; then
         echo "SKIP $run (already queued/running)"; continue
     fi
+    # Run a frozen copy, never the repo file: bash reads a script as it executes, so a
+    # `git pull` that replaces run_dyn_job.sh mid-run kills the job ("Stale file handle").
+    # That lost the generate/score stage of two mix4 runs on 2026-09-28.
+    frozen="${LOGDIR}/run_dyn_job.${run}.$(date +%s).sh"
+    cp "${REPO}/run_dyn_job.sh" "$frozen"
     cmd=(sbatch --parsable -D "$BASE"
          -o "${LOGDIR}/${run}-%j.out" -J "dyn_${run}"
          -p "$PART" --qos="$QOS" --gres="$GRES"
          --cpus-per-task=8 --mem=96G -t "$TIME" --requeue
-         --wrap "bash ${REPO}/run_dyn_job.sh ${run} slurm ${SEED} 0")
+         --wrap "bash ${frozen} ${run} slurm ${SEED} 0")
     if [ -n "${DRY:-}" ]; then printf '%q ' "${cmd[@]}"; echo; continue; fi
     id=$("${cmd[@]}" 2>&1 | tail -1)
     echo "submitted $run -> job $id"
