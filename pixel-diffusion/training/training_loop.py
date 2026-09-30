@@ -165,6 +165,41 @@ def per_group_state(spec, progress):
     return ('T', compute_scheduled_sigma_min({'type': 'static', 't_start': float(value)}, progress))
 
 
+# ---------------------------------------------------------------------------------------------
+# Learned per-image x per-time policy (t_schedule type 'policy').
+# Every `every_kimg` the policy sets each corrupted image's threshold
+#     T_i = sigmoid(theta . phi_i)
+# from features of the model's state (progress, clean exposure so far and projected to the end)
+# and of the image (Ambient-o classifier verdict a_i, standardised sharpness h_i), plus their
+# time x image interactions. theta is found by black-box search over full runs (policy/).
+POLICY_FEATURES = ('bias', 'p', 'passes', 'proj', 'a', 'h', 'p*a', 'p*h', 'proj*a', 'proj*h')
+
+
+def policy_features(p, passes, proj, a, h):
+    """phi for every image. p, passes, proj are scalars (passes in thousands); a, h arrays."""
+    a = np.asarray(a, dtype=np.float64)
+    h = np.asarray(h, dtype=np.float64)
+    one = np.ones_like(a)
+    return np.stack([one, p * one, passes * one, proj * one, a, h,
+                     p * a, p * h, proj * a, proj * h], axis=-1)
+
+
+def policy_T(theta, phi):
+    theta = np.asarray(theta, dtype=np.float64)
+    if theta.shape != (len(POLICY_FEATURES),):
+        raise ValueError(f'policy theta must have {len(POLICY_FEATURES)} entries, got {theta.shape}')
+    z = np.clip(phi @ theta, -50, 50)
+    return 1.0 / (1.0 + np.exp(-z))
+
+
+def T_to_sigma_array(T):
+    """Vectorised T -> sigma_min, identical to compute_scheduled_sigma_min's mapping."""
+    from scipy.stats import norm
+    T = np.asarray(T, dtype=np.float64)
+    s = np.exp(1.2 * norm.ppf(np.clip(T, 0.001, 0.999)) - 1.2)
+    return np.where(T <= 0.001, 0.0, s)
+
+
 def compute_topdown_band(t_schedule, progress):
     """Top-down withdrawal: blurred images are eligible only BELOW an upper noise cutoff.
 
@@ -524,6 +559,31 @@ def training_loop(
     tick_batch_seen = 0
     tick_corrupt_frac = float('nan')
 
+    # Learned policy (type 'policy'): per-image features, loaded once, in a fixed file order.
+    is_policy = isinstance(t_schedule, dict) and t_schedule.get('type') == 'policy'
+    if is_policy:
+        pol_theta = np.asarray(t_schedule['theta'], dtype=np.float64)
+        policy_T(pol_theta, np.zeros((1, len(POLICY_FEATURES))))          # validates the length
+        feats = json.load(open(t_schedule['features_path']))
+        pol_files = sorted(corrupt_filenames)
+        missing = [f for f in pol_files if f not in feats]
+        if missing:
+            raise ValueError(f'{len(missing)} corrupt images have no policy features, e.g. {missing[:3]}')
+        pol_a = np.array([feats[f][0] for f in pol_files])
+        pol_h = np.array([feats[f][1] for f in pol_files])
+        pol_groups = np.array([group_of(f) for f in pol_files])
+        pol_every = float(t_schedule.get('every_kimg', 50))
+        pol_next_kimg = cur_nimg / 1000.0
+        # Clean exposure is tracked here independently of any probe, and persisted so a
+        # preempted-and-resumed run does not restart it from zero.
+        pol_state_path = os.path.join(run_dir, 'policy_state.json')
+        pol_cum_clean_kimg = 0.0
+        pol_clean_frac = n_clean_images / max(1, n_clean_images + len(pol_files))
+        if os.path.exists(pol_state_path):
+            _ps = json.load(open(pol_state_path))
+            pol_cum_clean_kimg, pol_clean_frac = _ps['cum_clean_kimg'], _ps['clean_frac']
+        dist.print0(f'policy: {len(pol_files)} images, every {pol_every:g} kimg, theta={pol_theta.round(3).tolist()}')
+
     # Online probe. `probe` is an orthogonal key on the schedule dict: it turns
     # probing on, and `type: principled` separately says to *obey* the result.
     # Any existing schedule can therefore be probed without being steered by it,
@@ -569,7 +629,24 @@ def training_loop(
                     f"({'driving' if driving else 'logging only'}, "
                     f"{rec['probe']['probe_seconds']:.1f}s)")
 
-            if is_per_group:
+            if is_policy:
+                if cur_nimg / 1000.0 >= pol_next_kimg:
+                    n_c = max(1, n_clean_images)
+                    passes = pol_cum_clean_kimg * 1000.0 / n_c / 1000.0            # thousands of passes
+                    remaining_kimg = max(0.0, total_kimg - cur_nimg / 1000.0)
+                    proj = passes + pol_clean_frac * remaining_kimg * 1000.0 / n_c / 1000.0
+                    T_all = policy_T(pol_theta, policy_features(progress, passes, proj, pol_a, pol_h))
+                    sig_all = T_to_sigma_array(T_all)
+                    for fname, s_i in zip(pol_files, sig_all.tolist()):
+                        annotations[fname] = (s_i, 0.0)
+                        dataset_obj.annotations[fname] = (s_i, 0.0)
+                    progress_t_value = float(T_all.mean())
+                    current_sigma_min = float('nan')
+                    by_g = ' '.join(f'{g}={T_all[pol_groups == g].mean():.3f}' for g in sorted(set(pol_groups)))
+                    dist.print0(f'policy @ {cur_nimg / 1e3:.1f} kimg: p={progress:.3f} passes={passes:.3f}k '
+                                f'proj={proj:.3f}k mean T {by_g}')
+                    pol_next_kimg += pol_every
+            elif is_per_group:
                 numeric_T = []
                 for g, spec in t_schedule['groups'].items():
                     state = per_group_state(spec, progress)
@@ -622,9 +699,9 @@ def training_loop(
                 current_band_max = topdown_band_sigma(current_band_t)
             else:
                 current_sigma_min = compute_scheduled_sigma_min(t_schedule, progress)
-            if not is_per_group:   # per_group wrote its own groups above
+            if not (is_per_group or is_policy):   # these wrote their own annotations above
                 progress_t_value = sigma_min_to_t(current_sigma_min)
-            if not is_per_group and (current_sigma_min != last_scheduled_sigma_min
+            if not (is_per_group or is_policy) and (current_sigma_min != last_scheduled_sigma_min
                                      or current_band_max != last_band_max):
                 ann = ((current_sigma_min, 0.0) if current_band_max == float('inf')
                        else (current_sigma_min, 0.0, current_band_max))
@@ -749,6 +826,14 @@ def training_loop(
             if progress_t_value <= 1e-6:
                 # the clean share while blur is still in use, i.e. the controller's `a`
                 probe_ctrl.clean_frac_at_zero = _clean_frac
+        if is_policy and tick_batch_seen and np.isfinite(tick_corrupt_frac) and cur_tick >= 2:
+            pol_clean_frac = 1.0 - tick_corrupt_frac
+            pol_cum_clean_kimg += pol_clean_frac * (cur_nimg - last_exposure_nimg) / 1000.0
+            if dist.get_rank() == 0:
+                with open(pol_state_path + '.tmp', 'w') as _f:
+                    json.dump({'cum_clean_kimg': pol_cum_clean_kimg, 'clean_frac': pol_clean_frac,
+                               'kimg': cur_nimg / 1e3}, _f)
+                os.replace(pol_state_path + '.tmp', pol_state_path)
         if cur_tick < 2:
             last_exposure_nimg = cur_nimg     # skipped span, not credited either way
         last_exposure_nimg = cur_nimg

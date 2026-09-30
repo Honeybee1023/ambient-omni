@@ -104,7 +104,9 @@ HOLDOUT="${BASE}/celeba_processed_v2b/holdout_64"
 MIND_REF="${BASE}/generated/mind_ref_cache.npz"
 NAME="dyn_${RUN_NAME}_s${TRAIN_SEED}"
 RUNDIR="${BASE}/train_outputs/dyn_search/${NAME}"
-CKPT="${RUNDIR}/network-snapshot-002000.pkl"
+# Run length in kimg (default the study-wide 2000; the policy search uses 1000).
+RUN_KIMG=${RUN_KIMG:-2000}
+CKPT="${RUNDIR}/network-snapshot-$(printf '%06d' "$RUN_KIMG").pkl"
 GEN_OUT="${BASE}/generated/${NAME}_5k_gen"
 MIND_JSON="${BASE}/generated/mind_${NAME}.json"
 FID_JSON="${BASE}/generated/fid_${NAME}.json"
@@ -141,7 +143,7 @@ if [ ! -f "$CKPT" ]; then
     fi
     [ -z "$RESUME" ] && { rm -rf "$RUNDIR"; mkdir -p "$RUNDIR"; }
 
-    echo "--- Training 2000 kimg ---"
+    echo "--- Training ${RUN_KIMG} kimg ---"
     # --t_schedule is passed as a single argv element, no eval, no word
     # splitting: the JSON contains braces, brackets and commas and must reach
     # click byte-for-byte.
@@ -150,12 +152,12 @@ if [ ! -f "$CKPT" ]; then
         --cond=0 --arch=ddpmpp --batch=64 --tick=50 \
         --snap=$SNAP_TICKS --dump=$DUMP_TICKS \
         --corruption_probability=0.0 --noise_config=identity --s_max=4 \
-        --cache=False --duration=2 --seed=$TRAIN_SEED --workers=8 \
+        --cache=False --duration=$(awk "BEGIN{print ${RUN_KIMG}/1000}") --seed=$TRAIN_SEED --workers=8 \
         --t_schedule="$SCHEDULE" $RESUME ${TRAIN_EXTRA:-}
     if [ $? -ne 0 ]; then echo "ERROR: training failed for $NAME"; exit 1; fi
 fi
 
-if [ ! -f "$CKPT" ]; then echo "ERROR: no 2k checkpoint for $NAME"; exit 1; fi
+if [ ! -f "$CKPT" ]; then echo "ERROR: no ${RUN_KIMG}-kimg checkpoint for $NAME"; exit 1; fi
 
 # --- Generate 5K ---
 if [ ! -f "${GEN_OUT}/.complete" ]; then

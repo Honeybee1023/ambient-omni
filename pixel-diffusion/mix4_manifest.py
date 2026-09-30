@@ -135,6 +135,17 @@ ARMS = ARMS + [
      "note": "Dataloops loop 1 from the fixed-annotation loop 0 (restore sigma -> 0, relabel sigma/8, retrain)"},
 ]
 
+# --- Half-length (1000 kimg) references for the policy search, which runs at 1000 kimg.
+# Submit with RUN_KIMG=1000 (the ambo one also with its dataset and TRAIN_EXTRA=--cls_ema_window=1).
+ARMS = ARMS + [
+    {"name": "mix4h_c1", "schedule": same(step(0.72)), "note": "c1 at 1000 kimg (policy-search reference)"},
+    {"name": "mix4h_c5", "schedule": each(g03=step(0.75), g05=step(0.75), g10={"phases": [[0, 0.0], [0.40, "off"]]},
+                                          g20={"phases": [[0, 0.0], [0.40, "off"]]}), "note": "c5 at 1000 kimg (policy-search reference)"},
+    {"name": "mix4h_all_ambo_clean", "dataset": "celeba_mix4_ambo",
+     "schedule": same({"phases": [[0, 0.0], [0.40, "annot"], [0.75, "off"]]}),
+     "note": "best baseline at 1000 kimg (policy-search reference)"},
+]
+
 
 def main():
     if "--list" in sys.argv:
