@@ -98,6 +98,22 @@ ARMS = ARMS + [{"name": "mix4_dataloops1", "dataset": "celeba_mix4_loop1",
                 "note": "baseline 8: Ambient Dataloops loop 1 (restore sigma_tn -> 0, label sigma_tn/8, retrain)"}]
 
 
+# --- Continuous per-level curves (proposed with the user 2026-09-29). Hold T=0, then ramp.
+def cp(*pts):
+    return {"control_points": [list(q) for q in pts]}
+_MILD = {"g03": cp((0, 0), (0.60, 0), (1, 0.95)), "g05": cp((0, 0), (0.50, 0), (1, 0.95))}
+_HEAVY_OFF = {"g10": cp((0, 0), (0.35, 0), (0.50, 1.0), (1, 1.0)), "g20": cp((0, 0), (0.30, 0), (0.45, 1.0), (1, 1.0))}
+ARMS = ARMS + [
+    {"name": "mix4_p1_ramp_stagger", "schedule": each(**_MILD, g10=cp((0, 0), (0.40, 0), (1, 0.95)), g20=cp((0, 0), (0.30, 0), (1, 0.95))),
+     "note": "P1: hold 0 then linear to 0.95 at the end; ramp starts 0.3->60%, 0.5->50%, 1.0->40%, 2.0->30%"},
+    {"name": "mix4_p3_smooth_c5", "schedule": each(**_MILD, **_HEAVY_OFF),
+     "note": "P3: smooth c5 -- mild as P1, heavy ramp to off over 30-45% (2.0) / 35-50% (1.0)"},
+    {"name": "mix4_p4_concave", "schedule": each(g03=cp((0, 0), (0.60, 0), (0.80, 0.75), (1, 0.95)),
+                                                  g05=cp((0, 0), (0.50, 0), (0.75, 0.75), (1, 0.95)), **_HEAVY_OFF),
+     "note": "P4: P3 with the mild levels on the concave shape (0.75 by 75%/80%, then 0.95)"},
+]
+
+
 def main():
     if "--list" in sys.argv:
         for a in ARMS:
