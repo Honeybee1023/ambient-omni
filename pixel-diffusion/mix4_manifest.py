@@ -113,6 +113,28 @@ ARMS = ARMS + [
      "note": "P4: P3 with the mild levels on the concave shape (0.75 by 75%/80%, then 0.95)"},
 ]
 
+# --- Last hand-picked family (user, 2026-09-30): every level at 0 early, linear to 0.95 ending at
+# 75%, then flat; heavier blur starts its ramp earlier.
+def _end75(s03, s05, s10, s20):
+    r = lambda st: cp((0, 0), (st, 0), (0.75, 0.95), (1, 0.95))
+    return each(g03=r(s03), g05=r(s05), g10=r(s10), g20=r(s20))
+ARMS = ARMS + [
+    {"name": "mix4_q1_end75", "schedule": _end75(0.70, 0.65, 0.55, 0.45),
+     "note": "Q1: all reach 0.95 at 75%; ramps start 0.3->70%, 0.5->65%, 1.0->55%, 2.0->45%"},
+    {"name": "mix4_q2_end75_steep", "schedule": _end75(0.73, 0.70, 0.62, 0.55),
+     "note": "Q2: as Q1 but steeper; ramps start 0.3->73%, 0.5->70%, 1.0->62%, 2.0->55%"},
+]
+
+# --- Fair Dataloops (user, 2026-09-30): the official CIFAR recipe's FIXED sigma_min per corruption
+# (~2-2.4x the blur strength: 0.6->1.2, 0.8->1.9, 1.0->2.4), extrapolated to our levels, instead of
+# the classifier annotations that are blind to blur 0.3. Loop 0 doubles as Ambient-o fixed annotation.
+ARMS = ARMS + [
+    {"name": "mix4_dlfix_loop0", "dataset": "celeba_mix4_fixed", "schedule": same({"phases": [[0, "annot"]]}),
+     "note": "Ambient-o fixed annotation = Dataloops loop 0: sigma_min 0.7/1.1/2.4/4.8 for blur 0.3/0.5/1.0/2.0"},
+    {"name": "mix4_dlfix_loop1", "dataset": "celeba_mix4_fixed_loop1", "schedule": same({"phases": [[0, "annot"]]}),
+     "note": "Dataloops loop 1 from the fixed-annotation loop 0 (restore sigma -> 0, relabel sigma/8, retrain)"},
+]
+
 
 def main():
     if "--list" in sys.argv:
