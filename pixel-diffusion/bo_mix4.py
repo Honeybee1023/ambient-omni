@@ -127,12 +127,13 @@ def posterior(theta, X, y, Xs, floor):
     return mu, np.sqrt(var)
 
 
-def propose(done_X, done_y, pending_X, n_seen, seed):
-    """Next point. Sobol while fewer than N_INIT points exist, else EI with kriging believer."""
+def propose(done_X, done_y, pending_X, n_seen, sobol_seed, seed):
+    """Next point. Space-filling Sobol until N_INIT runs have FINISHED (with 12 in flight the
+    first proposals come before any result exists), else EI with kriging believer. The Sobol
+    sequence is fixed per search, so point k is always row k however the calls are split."""
     D = 8
-    if n_seen < N_INIT:
-        sob = qmc.Sobol(d=D, scramble=True, seed=seed).random(N_INIT)
-        return sob[n_seen]
+    if len(done_X) < N_INIT:
+        return qmc.Sobol(d=D, scramble=True, seed=sobol_seed).random(BUDGET)[n_seen]
     X = np.asarray(done_X, float)
     y = np.asarray(done_y, float)
     mu_y, sd_y = y.mean(), y.std() if y.std() > 0 else 1.0
@@ -272,14 +273,14 @@ def step(search, dry=False):
                 break
             done = [p for p in st['points'] if p['status'] == 'done']
             x = propose([p['x'] for p in done], [p['mind'] for p in done], [p['x'] for p in running],
-                        len(st['points']), seed=1000 + len(st['points']) if len(st['points']) >= N_INIT
-                        else (11 if search == 'true' else 23))
+                        len(st['points']), sobol_seed=11 if search == 'true' else 23,
+                        seed=1000 + len(st['points']))
             idx = len(st['points'])
             run = f'mix4bo_{search}_{idx:03d}'
             sched = decode(x, cfg['groups'])
             if dry:
                 print('would submit', run, where['part'], json.dumps(sched)); break
-            register(run, sched, f'bo_mix4 {search} point {idx} ({"sobol" if idx < N_INIT else "EI"})')
+            register(run, sched, f'bo_mix4 {search} point {idx} ({"sobol" if len(done) < N_INIT else "EI"})')
             jobid = submit(run, search, cfg['dataset'], where)
             st['points'].append(dict(name=run, x=[float(v) for v in x], schedule=sched, status='running',
                                      jobid=jobid, partition=where['part'], attempts=1,
