@@ -234,7 +234,7 @@ def mind_of(run):
     f = os.path.join(GEN, f'fid_dyn_{run}_s0.json')
     fid = None
     if os.path.exists(f):
-        d = json.load(open(f)); fid = d.get('fid', d.get('FID'))
+        d = json.load(open(f)); fid = d.get('fid_score', d.get('fid'))
     return mind, fid
 
 
