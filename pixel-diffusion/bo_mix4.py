@@ -178,9 +178,14 @@ def our_jobs():
     return out
 
 
+EXTRA = None   # set by `step --extra-sloan PART`: one opportunistic run on a GPU seen idle 5+ min
+
+
 def pick_partition(jobs):
     n_sloan = sum(1 for _, _, part in jobs.values() if 'sloan' in part)
     n_pre = sum(1 for _, _, part in jobs.values() if part == 'mit_preemptable')
+    if EXTRA is not None:
+        return dict(SLOAN, part=EXTRA)
     if n_sloan < SLOAN_CAP:
         return SLOAN
     if n_pre < PREEMPT_CAP:
@@ -269,7 +274,7 @@ def step(search, dry=False):
         # 2. top up
         while True:
             running = [p for p in st['points'] if p['status'] == 'running']
-            if len(running) >= CONCURRENCY or len(st['points']) >= BUDGET:
+            if len(running) >= CONCURRENCY + (4 if EXTRA is not None else 0) or len(st["points"]) >= BUDGET:
                 break
             where = pick_partition(jobs)
             if where is None:
@@ -290,6 +295,9 @@ def step(search, dry=False):
                                      submitted=time.strftime('%F %T')))
             jobs[f'dyn_{run}'] = (jobid, 'PENDING', where['part'])
             save(path, st)
+            if EXTRA is not None:      # exactly one opportunistic run per call
+                print(f'EXTRA_SUBMITTED {run} {jobid} {EXTRA}')
+                break
         if not dry:
             save(path, st)
 
@@ -313,7 +321,15 @@ if __name__ == '__main__':
     ap.add_argument('cmd', choices=['step', 'status'])
     ap.add_argument('--search', choices=list(SEARCHES))
     ap.add_argument('--dry', action='store_true')
+    ap.add_argument('--extra-sloan', metavar='PART', help='submit one run beyond the Sloan cap to PART '
+                    '(used only when a GPU there has sat idle 5+ min with nobody else waiting)')
     a = ap.parse_args()
+    if a.extra_sloan:
+        EXTRA = a.extra_sloan
+        if not a.search:   # the search with fewer runs in flight gets the slot
+            n = {k: sum(p['status'] == 'running' for p in load(os.path.join(STATE_DIR, f'{k}.json'), {'points': []})['points'])
+                 for k in SEARCHES}
+            a.search = min(n, key=n.get)
     if a.cmd == 'status':
         status()
     else:
