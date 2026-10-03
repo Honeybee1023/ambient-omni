@@ -50,8 +50,11 @@ NOISE_SD = 0.00089    # measured MIND replicate sd; the GP noise is clamped at o
 MAX_ATTEMPTS = 2      # a run that vanishes without MIND is resubmitted once
 
 # Good-citizen caps on OUR jobs (running + pending, both searches together).
-SLOAN_CAP = 8         # Sloan partitions are shared with Giannis's group and were queued up
-PREEMPT_CAP = 20      # mit_preemptable draws on our mit_general fairshare
+# mit_preemptable's QOS allows 4 GPUs per user (sacctmgr, 2026-10-03), so more than a couple
+# queued behind those 4 just sit idle; the Sloan partitions have no per-user GPU cap (ou_sloan_gpu
+# allows 24 submitted jobs) and Giannis said to use them freely.
+SLOAN_CAP = 20
+PREEMPT_CAP = 6
 SLOAN = dict(part='ou_sloan_gpu,sched_mit_sloan_gpu_r8', gres='gpu:1', time='24:00:00')
 PREEMPT = dict(part='mit_preemptable', gres='gpu:l40s:1', time='2-00:00:00')
 
