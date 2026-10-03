@@ -8,6 +8,7 @@
 """Main training loop."""
 
 import os
+import re
 import time
 import copy
 import json
@@ -891,6 +892,19 @@ def training_loop(
         # Save full dump of the training state.
         if (state_dump_ticks is not None) and (done or cur_tick % state_dump_ticks == 0) and cur_tick != 0 and dist.get_rank() == 0:
             torch.save(dict(net=net, optimizer_state=optimizer.state_dict()), os.path.join(run_dir, f'training-state-{cur_nimg//1000:06d}.pt'))
+            # KEEP_LAST_DUMPS=k keeps only the k newest resumable checkpoints (state dump + its
+            # same-kimg snapshot). Dumping every tick for preemption otherwise leaves ~36GB per
+            # run until it finishes, which a shared 1TB scratch cannot hold for 20 runs at once.
+            keep = int(os.environ.get('KEEP_LAST_DUMPS', '0'))
+            if keep > 0:
+                dumps = sorted(f for f in os.listdir(run_dir) if re.fullmatch(r'training-state-\d{6}\.pt', f))
+                for old in dumps[:-keep]:
+                    kimg_tag = old[len('training-state-'):-len('.pt')]
+                    for stale in (old, f'network-snapshot-{kimg_tag}.pkl'):
+                        try:
+                            os.remove(os.path.join(run_dir, stale))
+                        except FileNotFoundError:
+                            pass
 
         # Update logs.
         training_stats.default_collector.update()
