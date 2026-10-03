@@ -53,7 +53,7 @@ MAX_ATTEMPTS = 2      # a run that vanishes without MIND is resubmitted once
 # mit_preemptable's QOS allows 4 GPUs per user (sacctmgr, 2026-10-03), so more than a couple
 # queued behind those 4 just sit idle; the Sloan partitions have no per-user GPU cap (ou_sloan_gpu
 # allows 24 submitted jobs) and Giannis said to use them freely.
-SLOAN_CAP = 20
+SLOAN_CAP = 12   # 2026-10-03 evening: we held 18 of 36 Sloan GPUs with ~15 jobs of the group waiting
 PREEMPT_CAP = 6
 SLOAN = dict(part='ou_sloan_gpu,sched_mit_sloan_gpu_r8', gres='gpu:1', time='24:00:00')
 PREEMPT = dict(part='mit_preemptable', gres='gpu:l40s:1', time='2-00:00:00')
