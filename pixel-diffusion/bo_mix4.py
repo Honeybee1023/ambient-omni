@@ -130,32 +130,87 @@ def posterior(theta, X, y, Xs, floor):
     return mu, np.sqrt(var)
 
 
+# Restricted region (user, 2026-10-03, after the first 12 Sobol points per search all landed far from the
+# known-good schedules): every group jumps between 30% and 95% of training, to one of three levels. The GP
+# still sees every point ever run (including the Sobol ones and the earlier CSAIL runs below), but new
+# proposals only come from this region.
+WHEN_RANGE = (0.30, 0.95)
+WHERE_SET = (0.85, 0.95, 1.0)
+U_SET = tuple(2 * (w - 0.5) for w in WHERE_SET)          # where = 0.5 + 0.5 u
+
+
+def _w(when, where):
+    return [when, 2 * (where - 0.5)]
+
+
+def _x(*pairs):
+    return [v for pr in pairs for v in _w(*pr)]
+
+
+# Earlier mixed-blur runs (CSAIL, same dataset/recipe; Engaging's c1 matched CSAIL's to <0.5 sd) that are
+# exactly "T=0, then one jump" per group. "off" counts as where = 1.0; clean-only is "jump at 0 to 1.0".
+# Schedules identical across groups are valid for BOTH groupings.
+_SAME = {
+    'c1_global72':  ([(0.72, 0.95)] * 4, [0.0294, 0.0295, 0.02981]),
+    'finetune60':   ([(0.60, 1.0)] * 4, [0.03341]),
+    'finetune75':   ([(0.75, 1.0)] * 4, [0.0332]),
+    'finetune90':   ([(0.90, 1.0)] * 4, [0.0342]),
+    'cleanonly':    ([(0.0, 1.0)] * 4, [0.0464]),
+}
+_TRUE_ONLY = {   # order g03, g05, g10, g20
+    'c5_heavy_early': ([(0.75, 0.95), (0.75, 0.95), (0.40, 1.0), (0.40, 1.0)], [0.0289, 0.0283]),
+    'c3_stagger_wide': ([(0.85, 0.95), (0.70, 0.95), (0.55, 0.95), (0.40, 0.95)], [0.0304]),
+    'c2_stagger':     ([(0.85, 0.95), (0.75, 0.95), (0.65, 0.95), (0.55, 0.95)], [0.03218]),
+    'c4_mildkeep':    ([(0.85, 0.50), (0.75, 0.50), (0.65, 0.95), (0.55, 0.95)], [0.0360]),
+}
+
+
+def seeds(search):
+    out = []
+    for table in ([_SAME, _TRUE_ONLY] if search == 'true' else [_SAME]):
+        for name, (pairs, minds) in table.items():
+            for m in minds:
+                out.append((_x(*pairs), m))
+    return out
+
+
+def _restricted(rng, n):
+    C = np.empty((n, 8))
+    C[:, 0::2] = WHEN_RANGE[0] + (WHEN_RANGE[1] - WHEN_RANGE[0]) * qmc.Sobol(d=4, scramble=True, seed=int(rng.integers(1 << 30))).random(n)
+    C[:, 1::2] = rng.choice(U_SET, size=(n, 4))
+    return C
+
+
 def propose(done_X, done_y, pending_X, n_seen, sobol_seed, seed):
-    """Next point. Space-filling Sobol until N_INIT runs have FINISHED (with 12 in flight the
-    first proposals come before any result exists), else EI with kriging believer. The Sobol
-    sequence is fixed per search, so point k is always row k however the calls are split."""
-    D = 8
-    if len(done_X) < N_INIT:
-        return qmc.Sobol(d=D, scramble=True, seed=sobol_seed).random(BUDGET)[n_seen]
+    """Next point: EI under a GP fitted to every finished point (Sobol, BO and seeds), with running
+    points included at their predicted mean ("kriging believer") so concurrent proposals spread out.
+    Candidates come only from the restricted region."""
+    rng = np.random.default_rng(seed)
     X = np.asarray(done_X, float)
     y = np.asarray(done_y, float)
+    if len(X) < 3:
+        return _restricted(rng, 1)[0]
     mu_y, sd_y = y.mean(), y.std() if y.std() > 0 else 1.0
     ys = (y - mu_y) / sd_y
     floor = NOISE_SD / sd_y
     theta = fit_gp(X, ys, floor, seed=seed)
-    # Running points enter at their predicted mean: the GP then treats them as known and
-    # EI moves elsewhere, which is what keeps 12 concurrent proposals from being 12 copies.
+    n_done = len(X)
     if len(pending_X):
         P = np.asarray(pending_X, float)
         mp, _ = posterior(theta, X, ys, P, floor)
         X = np.vstack([X, P]); ys = np.concatenate([ys, mp])
-    rng = np.random.default_rng(seed)
-    cand = [qmc.Sobol(d=D, scramble=True, seed=seed).random(8192)]
-    top = X[np.argsort(ys)[:5]]
-    cand.append(np.clip(np.repeat(top, 400, 0) + rng.normal(0, 0.07, (len(top) * 400, D)), 0, 1))
+    cand = [_restricted(rng, 8192)]
+    # local moves around the best finished points: nudge jump times, sometimes change one jump level
+    top = np.asarray(done_X, float)[np.argsort(y)[:5]]
+    loc = np.repeat(top, 400, 0)
+    loc[:, 0::2] = np.clip(loc[:, 0::2] + rng.normal(0, 0.05, (len(loc), 4)), *WHEN_RANGE)
+    flip = rng.random((len(loc), 4)) < 0.25
+    loc[:, 1::2] = np.where(flip, rng.choice(U_SET, size=(len(loc), 4)), loc[:, 1::2])
+    loc[:, 1::2] = np.array(U_SET)[np.abs(loc[:, 1::2][..., None] - np.array(U_SET)).argmin(-1)]
+    cand.append(loc)
     C = np.vstack(cand)
     mu, sd = posterior(theta, X, ys, C, floor)
-    best = ys[:len(done_y)].min()
+    best = ys[:n_done].min()
     z = (best - mu) / sd
     ei = (best - mu) * norm.cdf(z) + sd * norm.pdf(z)
     return C[int(np.argmax(ei))]
@@ -281,7 +336,9 @@ def step(search, dry=False):
             if where is None:
                 break
             done = [p for p in st['points'] if p['status'] == 'done']
-            x = propose([p['x'] for p in done], [p['mind'] for p in done], [p['x'] for p in running],
+            sd_pts = seeds(search)
+            x = propose([p['x'] for p in done] + [x for x, _ in sd_pts],
+                        [p['mind'] for p in done] + [m for _, m in sd_pts], [p['x'] for p in running],
                         len(st['points']), sobol_seed=11 if search == 'true' else 23,
                         seed=1000 + len(st['points']))
             idx = len(st['points'])
@@ -289,7 +346,7 @@ def step(search, dry=False):
             sched = decode(x, cfg['groups'])
             if dry:
                 print('would submit', run, where['part'], json.dumps(sched)); break
-            register(run, sched, f'bo_mix4 {search} point {idx} ({"sobol" if len(done) < N_INIT else "EI"})')
+            register(run, sched, f'bo_mix4 {search} point {idx} (EI, restricted region)')
             jobid = submit(run, search, cfg['dataset'], where)
             st['points'].append(dict(name=run, x=[float(v) for v in x], schedule=sched, status='running',
                                      jobid=jobid, partition=where['part'], attempts=1,
