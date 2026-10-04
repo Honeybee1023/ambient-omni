@@ -336,6 +336,26 @@ def step(search, dry=False):
             if where is None:
                 break
             done = [p for p in st['points'] if p['status'] == 'done']
+            # Hand-specified runs (generated/bo_mix4/<search>_queue.json, a list of {"x": [...8], "note": str})
+            # go out before any new proposal, under the same caps, and become ordinary data for the GP.
+            qpath = os.path.join(STATE_DIR, f'{search}_queue.json')
+            queue = load(qpath, [])
+            if queue:
+                item = queue[0]
+                idx = len(st['points'])
+                run = f'mix4bo_{search}_{idx:03d}'
+                sched = decode(item['x'], cfg['groups'])
+                if dry:
+                    print('would submit queued', run, json.dumps(sched)); break
+                register(run, sched, 'bo_mix4 %s point %d (hand: %s)' % (search, idx, item['note']))
+                jobid = submit(run, search, cfg['dataset'], where)
+                st['points'].append(dict(name=run, x=[float(v) for v in item['x']], schedule=sched, status='running',
+                                         jobid=jobid, partition=where['part'], attempts=1, hand=item['note'],
+                                         submitted=time.strftime('%F %T')))
+                jobs[f'dyn_{run}'] = (jobid, 'PENDING', where['part'])
+                save(path, st)
+                save(qpath, queue[1:])
+                continue
             sd_pts = seeds(search)
             x = propose([p['x'] for p in done] + [x for x, _ in sd_pts],
                         [p['mind'] for p in done] + [m for _, m in sd_pts], [p['x'] for p in running],
