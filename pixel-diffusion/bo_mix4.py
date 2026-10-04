@@ -271,8 +271,9 @@ def step(search, dry=False):
                     jobs[f'dyn_{p["name"]}'] = (p['jobid'], 'PENDING', where['part'])
                 else:
                     p['status'] = 'failed'
-        # 2. top up
-        while True:
+        # 2. top up -- unless paused (touch generated/bo_mix4/PAUSE): collecting continues,
+        # nothing new is launched, and nothing running is touched.
+        while not os.path.exists(os.path.join(STATE_DIR, 'PAUSE')):
             running = [p for p in st['points'] if p['status'] == 'running']
             if len(running) >= CONCURRENCY + (4 if EXTRA is not None else 0) or len(st["points"]) >= BUDGET:
                 break
