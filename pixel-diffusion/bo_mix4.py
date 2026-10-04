@@ -44,7 +44,7 @@ SEARCHES = {
     'km':   dict(groups=['k1', 'k2', 'k3', 'k4'], dataset='celeba_mix4_km'),
 }
 N_INIT = 8            # Sobol points before the GP takes over
-BUDGET = 40           # total runs per search (initial + BO)
+BUDGET = 50           # total runs per search (raised from 40 on 2026-10-04 to keep GPUs busy while results are interpreted)
 CONCURRENCY = 12      # runs in flight per search
 NOISE_SD = 0.00089    # measured MIND replicate sd; the GP noise is clamped at or above it
 MAX_ATTEMPTS = 2      # a run that vanishes without MIND is resubmitted once
