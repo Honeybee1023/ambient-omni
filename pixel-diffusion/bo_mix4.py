@@ -330,7 +330,7 @@ def step(search, dry=False):
         # nothing new is launched, and nothing running is touched.
         while not os.path.exists(os.path.join(STATE_DIR, 'PAUSE')):
             running = [p for p in st['points'] if p['status'] == 'running']
-            if len(running) >= CONCURRENCY + (4 if EXTRA is not None else 0) or len(st["points"]) >= BUDGET:
+            if len(running) >= CONCURRENCY + (4 if EXTRA is not None else 0):
                 break
             where = pick_partition(jobs)
             if where is None:
@@ -356,6 +356,9 @@ def step(search, dry=False):
                 save(path, st)
                 save(qpath, queue[1:])
                 continue
+            # BUDGET caps the search's own proposals; hand-specified runs above do not count against it.
+            if sum(1 for p in st['points'] if 'hand' not in p) >= BUDGET:
+                break
             sd_pts = seeds(search)
             x = propose([p['x'] for p in done] + [x for x, _ in sd_pts],
                         [p['mind'] for p in done] + [m for _, m in sd_pts], [p['x'] for p in running],
