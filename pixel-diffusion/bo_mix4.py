@@ -62,6 +62,22 @@ PREEMPT = dict(part='mit_preemptable', gres='gpu:l40s:1', time='2-00:00:00')
 
 # ----------------------------------------------------------------------------- design space --
 
+def monotone_if_uncrossed(x):
+    """Rule (user, 2026-10-05): a schedule whose group curves do not cross is only worth running in its monotone
+    order -- the worse a group, the earlier AND higher it jumps. With no crossing the four one-jump curves are totally
+    ordered (one lies on or above the other everywhere), so there is exactly one such order: give the highest curve to
+    the worst group. Groups are listed mildest -> heaviest, x = [when, u] per group (where = 0.5 + 0.5u). Schedules that
+    cross are returned unchanged (crossing vs uncrossing is still being tested). Returns (x, changed)."""
+    c = [(float(x[2 * i]), float(x[2 * i + 1])) for i in range(len(x) // 2)]
+    crosses = any((a[0] - b[0]) * (a[1] - b[1]) > 0 for i, a in enumerate(c) for b in c[i + 1:])
+    if crosses:
+        return list(x), False
+    top_first = sorted(c, key=lambda t: (t[0], -t[1]))   # earliest jump, then highest level = highest curve
+    m = top_first[::-1]                                   # mildest group gets the lowest curve
+    out = [v for t in m for v in t]
+    return out, out != [float(v) for v in x]
+
+
 def decode(x, groups):
     """Unit-cube point -> per_group schedule. Values are rounded so names/specs stay readable."""
     spec = {}
@@ -369,12 +385,13 @@ def step(search, dry=False):
                         [p['mind'] for p in done] + [m for _, m in sd_pts], [p['x'] for p in running],
                         len(st['points']), sobol_seed=11 if search == 'true' else 23,
                         seed=1000 + len(st['points']))
+            x, made_mono = monotone_if_uncrossed(x)
             idx = len(st['points'])
             run = f'mix4bo_{search}_{idx:03d}'
             sched = decode(x, cfg['groups'])
             if dry:
                 print('would submit', run, where['part'], json.dumps(sched)); break
-            register(run, sched, f'bo_mix4 {search} point {idx} (EI, restricted region)')
+            register(run, sched, f'bo_mix4 {search} point {idx} (EI, restricted region' + ('; made monotone)' if made_mono else ')'))
             jobid = submit(run, search, cfg['dataset'], where)
             st['points'].append(dict(name=run, x=[float(v) for v in x], schedule=sched, status='running',
                                      jobid=jobid, partition=where['part'], attempts=1,
