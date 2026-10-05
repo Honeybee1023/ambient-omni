@@ -47,13 +47,19 @@ RUNS = {
     'afhq_c1': ('afhqdog_mix4_v1', lambda: from_manifest('mix4_c1_global72_sloan')),
     'afhq_true038': ('afhqdog_mix4_v1', lambda: from_manifest('mix4bo_true_038')),
     'afhq_true032': ('afhqdog_mix4_v1', lambda: from_manifest('mix4bo_true_032')),
+    # need the AFHQ classifier: Ambient-o as published (per-image thresholds, fixed all run), like CelebA mix4_ambo
+    'afhq_ambo': ('afhqdog_mix4_ambo', lambda: {'type': 'per_group', 'groups': {g: ph((0, 'annot')) for g in G}}),
     # need afhqdog_mix4_km (after the AFHQ classifier + k-means):
     'afhq_km038': ('afhqdog_mix4_km', lambda: from_manifest('mix4bo_km_038')),
     'afhq_km041': ('afhqdog_mix4_km', lambda: from_manifest('mix4bo_km_041')),
 }
 SOURCE = {'afhq_c5': 'CSAIL mix4_c5_heavy_early', 'afhq_c1': 'mix4_c1_global72', 'afhq_cleanonly': 'CSAIL mix4_cleanonly',
           'afhq_true038': 'mix4bo_true_038', 'afhq_true032': 'mix4bo_true_032',
-          'afhq_km038': 'mix4bo_km_038', 'afhq_km041': 'mix4bo_km_041'}
+          'afhq_ambo': 'CSAIL mix4_ambo', 'afhq_km038': 'mix4bo_km_038', 'afhq_km041': 'mix4bo_km_041'}
+
+
+# extra train.py flags, as for the CelebA runs: the 64-point annotation grid needs an EMA window of 1
+EXTRA = {'afhq_ambo': '--cls_ema_window=1'}
 
 
 def submit(run):
@@ -67,7 +73,7 @@ def submit(run):
     frozen = os.path.join(LOGDIR, f'run_dyn_job.{run}.{stamp}.sh')
     shutil.copy(os.path.join(bo.REPO, 'run_dyn_job.sh'), frozen)
     wrap = (f'export AMBIENT_BASE={BASE} DYN_DATASET={dataset} DYN_REF={REF} DYN_REF_CACHE={REF_CACHE} '
-            f'KEEP_LAST_DUMPS=2; nvidia-smi --query-gpu=name --format=csv,noheader; bash {frozen} {run} slurm 0 0')
+            f'KEEP_LAST_DUMPS=2' + (f' TRAIN_EXTRA={EXTRA[run]}' if run in EXTRA else '') + f'; nvidia-smi --query-gpu=name --format=csv,noheader; bash {frozen} {run} slurm 0 0')
     w = bo.SLOAN
     cmd = ['sbatch', '--parsable', '-D', BASE, '-J', f'dyn_{run}', '-o', os.path.join(LOGDIR, f'{run}-%j.out'),
            '-p', w['part'], f'--gres={w["gres"]}', '--cpus-per-task=8', '--mem=64G', '-t', w['time'],
