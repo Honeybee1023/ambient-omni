@@ -49,11 +49,11 @@ RUNS = {
     'afhq_true032': ('afhqdog_mix4_v1', lambda: from_manifest('mix4bo_true_032')),
     # need afhqdog_mix4_km (after the AFHQ classifier + k-means):
     'afhq_km038': ('afhqdog_mix4_km', lambda: from_manifest('mix4bo_km_038')),
-    'afhq_km026': ('afhqdog_mix4_km', lambda: from_manifest('mix4bo_km_026')),
+    'afhq_km041': ('afhqdog_mix4_km', lambda: from_manifest('mix4bo_km_041')),
 }
 SOURCE = {'afhq_c5': 'CSAIL mix4_c5_heavy_early', 'afhq_c1': 'mix4_c1_global72', 'afhq_cleanonly': 'CSAIL mix4_cleanonly',
           'afhq_true038': 'mix4bo_true_038', 'afhq_true032': 'mix4bo_true_032',
-          'afhq_km038': 'mix4bo_km_038', 'afhq_km026': 'mix4bo_km_026'}
+          'afhq_km038': 'mix4bo_km_038', 'afhq_km041': 'mix4bo_km_041'}
 
 
 def submit(run):
