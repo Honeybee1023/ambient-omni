@@ -28,6 +28,8 @@ export MASTER_ADDR=localhost MASTER_PORT=$((32100 + RANDOM % 200))
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export WANDB_MODE=offline
 export KEEP_LAST_DUMPS=0
+# CLS_EXTRA: extra train.py flags, e.g. "--batch-gpu=128" to run the same total batch 512 on one GPU
+# by gradient accumulation (identical recipe, fewer GPUs).
 cd "${AMBIENT_BASE}/ambient-omni/pixel-diffusion" || exit 1
 CLS_ID=${CLS_ID:-cls_mix4_afhqdog}
 DATA="${AMBIENT_BASE}/annotated_datasets/${CLS_DATA:-afhqdog_cls_mix4}"
@@ -48,4 +50,4 @@ python -m torch.distributed.run --standalone --nproc_per_node="$NGPU" train.py \
     --cond=0 --arch=ddpmpp --batch=512 --lr=1e-4 \
     --tick=40 --snap=5 --dump=5 \
     --corruption_probability=0.0 --noise_config=identity --s_max=4 \
-    --cache=False --duration=7.68 --seed=0 --workers=8 $RESUME
+    --cache=False --duration=7.68 --seed=0 --workers=8 $RESUME ${CLS_EXTRA:-}
