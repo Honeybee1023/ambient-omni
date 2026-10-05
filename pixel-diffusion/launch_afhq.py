@@ -52,14 +52,43 @@ RUNS = {
     # need afhqdog_mix4_km (after the AFHQ classifier + k-means):
     'afhq_km038': ('afhqdog_mix4_km', lambda: from_manifest('mix4bo_km_038')),
     'afhq_km041': ('afhqdog_mix4_km', lambda: from_manifest('mix4bo_km_041')),
+    # --- baselines, copied from the CelebA mix4 table (mix4_manifest.py) ---
+    **{f'afhq_finetune{int(f * 100)}': ('afhqdog_mix4_v1', (lambda f=f: {'type': 'per_group', 'groups': {
+        g: ph((0, 0.0), (f, 'off')) for g in G}})) for f in (0.60, 0.75, 0.90)},
+    # static Ambient-o per level: CelebA's values (each level's best from its own CelebA sweep) ...
+    'afhq_static_celeba': ('afhqdog_mix4_v1', lambda: {'type': 'per_group', 'groups': {
+        'g03': ph((0, 0.50)), 'g05': ph((0, 0.50)), 'g10': ph((0, 0.95)), 'g20': ph((0, 0.95))}}),
+    # ... and AFHQ's own: the median per-image Ambient-o threshold of each level (AFHQ classifier, no sweep)
+    'afhq_static_cls': ('afhqdog_mix4_v1', lambda: {'type': 'per_group', 'groups': {
+        'g03': ph((0, 0.027)), 'g05': ph((0, 0.733)), 'g10': ph((0, 0.955)), 'g20': ph((0, 0.985))}}),
+    'afhq_ambo_then_clean': ('afhqdog_mix4_ambo', lambda: {'type': 'per_group', 'groups': {
+        g: ph((0, 'annot'), (0.75, 'off')) for g in G}}),
+    'afhq_all_then_ambo': ('afhqdog_mix4_ambo', lambda: {'type': 'per_group', 'groups': {
+        g: ph((0, 0.0), (0.75, 'annot')) for g in G}}),
+    'afhq_all_ambo_clean': ('afhqdog_mix4_ambo', lambda: {'type': 'per_group', 'groups': {
+        g: ph((0, 0.0), (0.40, 'annot'), (0.75, 'off')) for g in G}}),
 }
+# Any CelebA search run copies the same way: afhq_true030 <- mix4bo_true_030 (true blur levels),
+# afhq_km049 <- mix4bo_km_049 (k-means groups, AFHQ's own afhqdog_mix4_km).
+for _n in [f'true_{i:03d}' for i in range(80)] + [f'km_{i:03d}' for i in range(80)]:
+    _k = 'afhq_' + _n.replace('_', '')
+    if _k not in RUNS:
+        RUNS[_k] = ('afhqdog_mix4_km' if _n.startswith('km') else 'afhqdog_mix4_v1',
+                    (lambda n=_n: from_manifest('mix4bo_' + n)))
 SOURCE = {'afhq_c5': 'CSAIL mix4_c5_heavy_early', 'afhq_c1': 'mix4_c1_global72', 'afhq_cleanonly': 'CSAIL mix4_cleanonly',
           'afhq_true038': 'mix4bo_true_038', 'afhq_true032': 'mix4bo_true_032',
-          'afhq_ambo': 'CSAIL mix4_ambo', 'afhq_km038': 'mix4bo_km_038', 'afhq_km041': 'mix4bo_km_041'}
+          'afhq_ambo': 'CSAIL mix4_ambo', 'afhq_km038': 'mix4bo_km_038', 'afhq_km041': 'mix4bo_km_041',
+          'afhq_finetune60': 'CSAIL mix4_finetune60', 'afhq_finetune75': 'CSAIL mix4_finetune75',
+          'afhq_finetune90': 'CSAIL mix4_finetune90', 'afhq_static_celeba': 'CSAIL mix4_static (same thresholds)',
+          'afhq_static_cls': 'static Ambient-o at AFHQ classifier per-level medians (no CelebA sweep)',
+          'afhq_ambo_then_clean': 'CSAIL mix4_ambo_then_clean', 'afhq_all_then_ambo': 'CSAIL mix4_all_then_ambo',
+          'afhq_all_ambo_clean': 'CSAIL mix4_all_ambo_clean'}
+for _k in RUNS:
+    SOURCE.setdefault(_k, 'mix4bo_' + _k[5:].replace('true', 'true_').replace('km', 'km_'))
 
 
 # extra train.py flags, as for the CelebA runs: the 64-point annotation grid needs an EMA window of 1
-EXTRA = {'afhq_ambo': '--cls_ema_window=1'}
+EXTRA = {k: '--cls_ema_window=1' for k in ('afhq_ambo', 'afhq_ambo_then_clean', 'afhq_all_then_ambo', 'afhq_all_ambo_clean')}
 
 
 def submit(run):
