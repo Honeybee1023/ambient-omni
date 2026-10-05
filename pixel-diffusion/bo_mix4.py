@@ -53,7 +53,8 @@ MAX_ATTEMPTS = 2      # a run that vanishes without MIND is resubmitted once
 # mit_preemptable's QOS allows 4 GPUs per user (sacctmgr, 2026-10-03), so more than a couple
 # queued behind those 4 just sit idle; the Sloan partitions have no per-user GPU cap (ou_sloan_gpu
 # allows 24 submitted jobs) and Giannis said to use them freely.
-SLOAN_CAP = 12   # 2026-10-03 evening: we held 18 of 36 Sloan GPUs with ~15 jobs of the group waiting
+SLOAN_CAP = 12   # RUNNING GPUs on Sloan (2026-10-03 evening: we held 18 of 36 with ~15 jobs of the group waiting)
+SLOAN_PENDING = 2   # our jobs allowed to wait in Sloan's line at once
 PREEMPT_CAP = 6
 SLOAN = dict(part='ou_sloan_gpu,sched_mit_sloan_gpu_r8', gres='gpu:1', time='24:00:00')
 PREEMPT = dict(part='mit_preemptable', gres='gpu:l40s:1', time='2-00:00:00')
@@ -237,11 +238,15 @@ EXTRA = None   # set by `step --extra-sloan PART`: one opportunistic run on a GP
 
 
 def pick_partition(jobs):
-    n_sloan = sum(1 for _, _, part in jobs.values() if 'sloan' in part)
+    # Sloan share = GPUs in USE (user, 2026-10-05): up to SLOAN_CAP of our jobs running there, plus at most
+    # SLOAN_PENDING waiting in line so a freed slot is filled at once. Counts every job of ours (AFHQ,
+    # classifiers, ...), not just the searches.
+    n_sloan_run = sum(1 for _, st, part in jobs.values() if 'sloan' in part and st == 'RUNNING')
+    n_sloan_pend = sum(1 for _, st, part in jobs.values() if 'sloan' in part and st != 'RUNNING')
     n_pre = sum(1 for _, _, part in jobs.values() if part == 'mit_preemptable')
     if EXTRA is not None:
         return dict(SLOAN, part=EXTRA)
-    if n_sloan < SLOAN_CAP:
+    if n_sloan_run < SLOAN_CAP and n_sloan_pend < SLOAN_PENDING:
         return SLOAN
     if n_pre < PREEMPT_CAP:
         return PREEMPT

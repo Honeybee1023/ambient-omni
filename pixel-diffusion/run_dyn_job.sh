@@ -100,8 +100,10 @@ MANIFEST="${BASE}/generated/dyn_search_manifest.json"
 # but the batch stays on one file regardless -- mixing them would reintroduce
 # exactly the cross-era comparison this project keeps getting burned by.
 DATA="${BASE}/annotated_datasets/${DYN_DATASET:-celeba_dynamic_t_v2}"
-HOLDOUT="${BASE}/celeba_processed_v2b/holdout_64"
-MIND_REF="${BASE}/generated/mind_ref_cache.npz"
+# Reference set for MIND / FID (default: CelebA 20K held-out faces). Other datasets pass DYN_REF and
+# DYN_REF_CACHE, e.g. AFHQ dogs: afhqdog_processed/train_clean_64 + generated/mind_ref_cache_afhqdog.npz.
+HOLDOUT="${DYN_REF:-${BASE}/celeba_processed_v2b/holdout_64}"
+MIND_REF="${DYN_REF_CACHE:-${BASE}/generated/mind_ref_cache.npz}"
 NAME="dyn_${RUN_NAME}_s${TRAIN_SEED}"
 RUNDIR="${BASE}/train_outputs/dyn_search/${NAME}"
 # Run length in kimg (default the study-wide 2000; the policy search uses 1000).
@@ -127,6 +129,7 @@ echo "=== $NAME | GPU $GPU_ID (slot $SLOT) | seed $TRAIN_SEED | $(date) ==="
 echo "    schedule: $SCHEDULE"
 [ -n "${TRAIN_EXTRA:-}" ] && echo "    extra train.py args: $TRAIN_EXTRA"
 echo "    checkpoint every $((DUMP_TICKS * 50)) kimg (snap=$SNAP_TICKS dump=$DUMP_TICKS)"
+echo "    reference: $HOLDOUT ($MIND_REF)"
 echo "    dataset: $DATA ($(wc -l < "$DATA/annotations.jsonl" 2>/dev/null || echo '?') annotations)"
 if [ "$GPU_ID" = "slurm" ]; then
     nvidia-smi --query-gpu=index,uuid,memory.free --format=csv,noheader 2>/dev/null
