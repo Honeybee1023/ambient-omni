@@ -34,6 +34,13 @@ Two things this has to get right:
 
 Usage (on the machine with the data):
     python dataset_creation/create_cls_dataset.py --src celeba_dynamic_t_v2_b0b5
+
+AFHQ-dog (2026-10-05): the source files are PNG and the mix4 blur is ROUNDED, so the paired set is
+built with --ext .png --rint, which makes every blurred copy byte-identical to what
+create_afhqdog_mix4.py would write for that dog at that level:
+    python dataset_creation/create_cls_dataset.py --src afhqdog_mix4_v1 --name afhqdog_cls_mix4 \
+        --blur_sigmas 0.3,0.5,1.0,2.0 --ext .png --rint
+The defaults (.jpg, truncation) reproduce the CelebA sets unchanged.
 """
 
 # Per-machine paths: see env.sh / SYNC.md at the repo root.  Inlined rather
@@ -59,6 +66,9 @@ def main():
     ap.add_argument("--blur_sigma", type=float, default=0.5, help="b5 is 0.5; larger values are controls")
     ap.add_argument("--blur_sigmas", default=None,
                     help="comma-separated, e.g. 0.3,0.5,1.0,2.0: a MIXED-corruption classifier. Each face\n                         then appears once blurred at every level and once clean per level (clean\n                         copies are extra symlinks), so classes stay balanced and identity stays useless.")
+    ap.add_argument("--ext", default=".jpg", help="extension of the source files (.png for AFHQ-dog)")
+    ap.add_argument("--rint", action="store_true",
+                    help="round the blurred float array before uint8 (the AFHQ fix); default truncates like CelebA")
     args = ap.parse_args()
 
     src = os.path.join(AMBIENT_BASE, "annotated_datasets", args.src)
@@ -72,7 +82,9 @@ def main():
     from scipy.ndimage import gaussian_filter
     BLUR_SIGMA = args.blur_sigma                       # bucket b5 is 0.5
 
-    files = sorted(f for f in os.listdir(src) if f.endswith(".jpg"))
+    files = sorted(f for f in os.listdir(src) if f.endswith(args.ext))
+    to_u8 = (lambda a: np.clip(np.rint(a), 0, 255).astype(np.uint8)) if args.rint else \
+            (lambda a: np.clip(a, 0, 255).astype(np.uint8))
     clean = [f for f in files if f.startswith(CLEAN_PREFIX)]
     if not clean:
         raise SystemExit(f"expected {CLEAN_PREFIX}* files in {src}")
@@ -101,7 +113,7 @@ def main():
                 bp = os.path.join(out, bname)
                 if not os.path.exists(bp):
                     arr = gaussian_filter(arr0, sigma=(s_b, s_b, 0))
-                    Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8)).save(bp)
+                    Image.fromarray(to_u8(arr)).save(bp)
                 add(bname, 1)
         BLUR_SIGMA = levels
         clean = []   # handled above; skip the single-level loop
@@ -119,7 +131,7 @@ def main():
             arr = np.array(Image.open(os.path.join(src, f)).convert("RGB"), dtype=np.float32)
             arr = gaussian_filter(arr, sigma=(BLUR_SIGMA, BLUR_SIGMA, 0))
             # PNG: no second JPEG pass eating the very high frequencies the cue lives in
-            Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8)).save(bp.replace(".jpg", ".png"))
+            Image.fromarray(to_u8(arr)).save(bp.replace(".jpg", ".png"))
         add(bname, 1)
 
     with open(os.path.join(out, "annotations.jsonl"), "w") as fh:
