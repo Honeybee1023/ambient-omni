@@ -125,6 +125,9 @@ if not r: sys.exit('no such run: $RUN_NAME')
 print(json.dumps(r[0]['schedule'],separators=(',',':')))
 ") || exit 1
 
+# A manifest schedule of null means no schedule at all (an all-clean "oracle" run: no sentinel images,
+# and train.py refuses --t_schedule on a dataset without them).
+if [ "$SCHEDULE" = "null" ]; then SCHED_ARG=(); else SCHED_ARG=(--t_schedule="$SCHEDULE"); fi
 echo "=== $NAME | GPU $GPU_ID (slot $SLOT) | seed $TRAIN_SEED | $(date) ==="
 echo "    schedule: $SCHEDULE"
 [ -n "${TRAIN_EXTRA:-}" ] && echo "    extra train.py args: $TRAIN_EXTRA"
@@ -156,7 +159,7 @@ if [ ! -f "$CKPT" ]; then
         --snap=$SNAP_TICKS --dump=$DUMP_TICKS \
         --corruption_probability=0.0 --noise_config=identity --s_max=4 \
         --cache=False --duration=$(awk "BEGIN{print ${RUN_KIMG}/1000}") --seed=$TRAIN_SEED --workers=8 \
-        --t_schedule="$SCHEDULE" $RESUME ${TRAIN_EXTRA:-}
+        "${SCHED_ARG[@]}" $RESUME ${TRAIN_EXTRA:-}
     if [ $? -ne 0 ]; then echo "ERROR: training failed for $NAME"; exit 1; fi
 fi
 
