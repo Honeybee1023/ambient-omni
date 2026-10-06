@@ -52,6 +52,8 @@ RUNS = {
     # need afhqdog_mix4_km (after the AFHQ classifier + k-means):
     'afhq_km038': ('afhqdog_mix4_km', lambda: from_manifest('mix4bo_km_038')),
     'afhq_km041': ('afhqdog_mix4_km', lambda: from_manifest('mix4bo_km_041')),
+    # Dataloops loop 1 (as CelebA mix4_dataloops1): dataloops_restore.py with the afhq_ambo model, annotations fixed
+    'afhq_dataloops1': ('afhqdog_mix4_loop1', lambda: {'type': 'per_group', 'groups': {g: ph((0, 'annot')) for g in G}}),
     # Oracle: every training dog, unblurred, no schedule -- the best a model can do at this length (upper bound)
     'afhq_oracle': ('afhqdog_oracle', lambda: None),
     # --- baselines, copied from the CelebA mix4 table (mix4_manifest.py) ---
@@ -84,7 +86,7 @@ for _k in list(RUNS):
     RUNS[_k + '_wu'] = RUNS[_k]
 SOURCE = {'afhq_c5': 'CSAIL mix4_c5_heavy_early', 'afhq_c1': 'mix4_c1_global72', 'afhq_cleanonly': 'CSAIL mix4_cleanonly',
           'afhq_true038': 'mix4bo_true_038', 'afhq_true032': 'mix4bo_true_032',
-          'afhq_ambo': 'CSAIL mix4_ambo', 'afhq_oracle': 'oracle: all 4,739 training dogs unblurred (no CelebA source)', 'afhq_km038': 'mix4bo_km_038', 'afhq_km041': 'mix4bo_km_041',
+          'afhq_ambo': 'CSAIL mix4_ambo', 'afhq_dataloops1': 'CSAIL mix4_dataloops1 (restored with afhq_ambo)', 'afhq_oracle': 'oracle: all 4,739 training dogs unblurred (no CelebA source)', 'afhq_km038': 'mix4bo_km_038', 'afhq_km041': 'mix4bo_km_041',
           'afhq_finetune60': 'CSAIL mix4_finetune60', 'afhq_finetune75': 'CSAIL mix4_finetune75',
           'afhq_finetune90': 'CSAIL mix4_finetune90', 'afhq_static_celeba': 'CSAIL mix4_static (same thresholds)',
           'afhq_static_cls': 'static Ambient-o at AFHQ classifier per-level medians (no CelebA sweep)',
