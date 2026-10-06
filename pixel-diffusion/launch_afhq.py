@@ -77,6 +77,11 @@ for _n in [f'true_{i:03d}' for i in range(80)] + [f'km_{i:03d}' for i in range(8
     if _k not in RUNS:
         RUNS[_k] = ('afhqdog_mix4_km' if _n.startswith('km') else 'afhqdog_mix4_v1',
                     (lambda n=_n: from_manifest('mix4bo_' + n)))
+# Proper-warm-up variants: <run>_wu = the same run with the LR held at EDM/Ambient-o's AFHQ value (2e-4) after a
+# 100-kimg warm-up (5% of the run), instead of the default ramp to 1e-3 over 10,000 kimg (which ends at 2e-4).
+WU_FLAGS = '--lr=2e-4 --lr_rampup_kimg=100'
+for _k in list(RUNS):
+    RUNS[_k + '_wu'] = RUNS[_k]
 SOURCE = {'afhq_c5': 'CSAIL mix4_c5_heavy_early', 'afhq_c1': 'mix4_c1_global72', 'afhq_cleanonly': 'CSAIL mix4_cleanonly',
           'afhq_true038': 'mix4bo_true_038', 'afhq_true032': 'mix4bo_true_032',
           'afhq_ambo': 'CSAIL mix4_ambo', 'afhq_oracle': 'oracle: all 4,739 training dogs unblurred (no CelebA source)', 'afhq_km038': 'mix4bo_km_038', 'afhq_km041': 'mix4bo_km_041',
@@ -85,6 +90,8 @@ SOURCE = {'afhq_c5': 'CSAIL mix4_c5_heavy_early', 'afhq_c1': 'mix4_c1_global72',
           'afhq_static_cls': 'static Ambient-o at AFHQ classifier per-level medians (no CelebA sweep)',
           'afhq_ambo_then_clean': 'CSAIL mix4_ambo_then_clean', 'afhq_all_then_ambo': 'CSAIL mix4_all_then_ambo',
           'afhq_all_ambo_clean': 'CSAIL mix4_all_ambo_clean'}
+for _k in [k for k in RUNS if k.endswith('_wu')]:
+    SOURCE.setdefault(_k, SOURCE.get(_k[:-3], 'mix4bo_' + _k[5:-3].replace('true', 'true_').replace('km', 'km_')) + ' + proper warm-up')
 for _k in RUNS:
     SOURCE.setdefault(_k, 'mix4bo_' + _k[5:].replace('true', 'true_').replace('km', 'km_'))
 
@@ -98,13 +105,14 @@ def submit(run):
     if not os.path.isdir(os.path.join(BASE, 'annotated_datasets', dataset)):
         sys.exit(f'{run}: dataset {dataset} not built yet')
     sched = sched_fn()
+    extra = ' '.join(x for x in (EXTRA.get(run.removesuffix('_wu'), ''), WU_FLAGS if run.endswith('_wu') else '') if x)
     bo.register(run, sched, f'AFHQ dog, schedule copied unchanged from CelebA {SOURCE[run]}')
     os.makedirs(LOGDIR, exist_ok=True)
     stamp = int(time.time())
     frozen = os.path.join(LOGDIR, f'run_dyn_job.{run}.{stamp}.sh')
     shutil.copy(os.path.join(bo.REPO, 'run_dyn_job.sh'), frozen)
     wrap = (f'export AMBIENT_BASE={BASE} DYN_DATASET={dataset} DYN_REF={REF} DYN_REF_CACHE={REF_CACHE} '
-            f'KEEP_LAST_DUMPS=2' + (f' TRAIN_EXTRA={EXTRA[run]}' if run in EXTRA else '') + f'; nvidia-smi --query-gpu=name --format=csv,noheader; bash {frozen} {run} slurm 0 0')
+            f'KEEP_LAST_DUMPS=2' + (f' TRAIN_EXTRA="{extra}"' if extra else '') + f'; nvidia-smi --query-gpu=name --format=csv,noheader; bash {frozen} {run} slurm 0 0')
     w = bo.SLOAN
     cmd = ['sbatch', '--parsable', '-D', BASE, '-J', f'dyn_{run}', '-o', os.path.join(LOGDIR, f'{run}-%j.out'),
            '-p', w['part'], f'--gres={w["gres"]}', '--cpus-per-task=8', '--mem=64G', '-t', w['time'],
