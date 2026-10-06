@@ -7,7 +7,8 @@ same curve over the run as in every 2000-kimg run (it ends at 20% of peak in bot
   full     celeba_mix4_km             all images: each clean face is seen 4x fewer times than in the 2000-kimg run
   quarter  celeba_mix4_km_q4          every group (clean included) subsampled to 1/4 with a fixed seed: each image is
                                       seen as often, at every fraction of training, as in the 2000-kimg run
-MIND/FID use the same reference set as the 2000-kimg runs.
+MIND/FID use the same reference set as the 2000-kimg runs. SHORT_PART overrides the partition (a ~1.5-h run fits
+the public mit_normal_gpu 6-h limit; Sloan allows ~24 submitted jobs per user).
 
 Usage (Engaging, via srun/sbatch):
     python launch_short.py build                      # make celeba_mix4_km_q4 (symlinks)
@@ -65,7 +66,7 @@ def submit(arm, src_runs):
                 f'TRAIN_EXTRA=--lr_rampup_kimg={RAMPUP}; nvidia-smi --query-gpu=name --format=csv,noheader; '
                 f'bash {frozen} {run} slurm 0 0')
         cmd = ['sbatch', '--parsable', '-D', BASE, '-J', f'dyn_{run}', '-o', os.path.join(LOGDIR, f'{run}-%j.out'),
-               '-p', bo.SLOAN['part'], '--gres=gpu:1', '--cpus-per-task=6', '--mem=14G', '-t', '06:00:00',
+               '-p', os.environ.get('SHORT_PART', bo.SLOAN['part']), '--gres=gpu:1', '--cpus-per-task=6', '--mem=14G', '-t', '06:00:00',
                '--requeue', '--wrap', wrap]
         r = bo.sh(cmd)
         print(run, r.stdout.strip() or r.stderr.strip())
