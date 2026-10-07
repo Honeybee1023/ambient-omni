@@ -17,6 +17,7 @@ Usage (Engaging, via srun/sbatch):
     python short_search.py step  --search q4a        # collect results; submit the next batch if one is due
     python short_search.py noise --search q4a --source mix4bo_km_056   # one repeat (seed 1) to measure noise
     python short_search.py status --search q4a
+A search stops submitting new batches when its state has "paused": true.
 """
 import argparse, json, os, shutil, sys, time
 
@@ -130,7 +131,8 @@ def step(search):
             if q.get('mind') is None:
                 q['mind'], q['fid'] = mind_fid(q['name'], q.get('seed', 0))
         pending = [q for q in st['points'] if q.get('mind') is None]
-        if not pending and len(st['points']) < st['budget'] and not os.path.exists(os.path.join(STATE_DIR, 'PAUSE')):
+        if (not pending and len(st['points']) < st['budget'] and not st.get('paused')
+                and not os.path.exists(os.path.join(STATE_DIR, 'PAUSE'))):
             rng = np.random.default_rng(st['seed'] + 7 * len(st['points']))
             for x in propose_batch(st, rng):
                 i = len(st['points'])
@@ -145,6 +147,9 @@ def step(search):
                 first = sorted(st['points'][:n], key=lambda q: q['mind'])[0]
                 st['picks'][str(n)] = first['name']
         bo.save(p, st)
+    import launch_ss2m                                   # scale finished checkpoints' top 3 up to 2000 kimg
+    if search in launch_ss2m.AUTO:
+        launch_ss2m.update(search)
 
 
 def main():
