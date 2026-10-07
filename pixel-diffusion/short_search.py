@@ -8,7 +8,7 @@ match the full run at every fraction of training and jump times carry over as pl
 
 Search space (user, 2026-10-05): one jump per group, monotone and therefore non-crossing -- the worse a group, the
 earlier AND at least as high it jumps. Groups are listed mildest -> worst (k1..k4). Levels from LEVELS. Objective:
-log MIND (FID recorded alongside). Batches of 4: the first two batches are space-filling, then a GP (Matern 5/2,
+log MIND (FID recorded alongside). First N_INIT=8 space-filling runs at once, then batches of 4: a GP (Matern 5/2,
 bo_mix4's fit) picks each batch by expected improvement with "kriging believer" for points already chosen. A new
 batch is submitted only when the previous one has fully finished.
 
@@ -34,7 +34,7 @@ WHEN_RANGE = (0.10, 0.95)
 BATCH, N_INIT = 4, 8
 LR_FLAGS = {'old': '--lr_rampup_kimg=2500',                    # the default ramp (10000 kimg) scaled by 1/4
             'wu': '--lr=2e-4 --lr_rampup_kimg=25'}            # proper warm-up (100 kimg at 2000) scaled by 1/4
-PART = os.environ.get('SHORT_PART', 'ou_sloan_gpu,sched_mit_sloan_gpu_r8,mit_normal_gpu')
+PART = os.environ.get('SHORT_PART', 'ou_sloan_gpu,sched_mit_sloan_gpu_r8')   # untyped gres on mit_normal_gpu = L40S
 
 
 def path(search):
@@ -68,8 +68,8 @@ def schedule(x):
 
 def propose_batch(st, rng):
     done = [p for p in st['points'] if p.get('mind') is not None]
-    if len(st['points']) < N_INIT or len(done) < 3:
-        return space_filling(st['seed'] + len(st['points']), BATCH)
+    if not st['points']:                       # one joint Sobol design of N_INIT spread-out runs, all at once
+        return space_filling(st['seed'], N_INIT)
     X = feats([p['x'] for p in done]); y = np.log([p['mind'] for p in done])
     mu_y, sd_y = y.mean(), (y.std() or 1.0)
     ys = (y - mu_y) / sd_y
