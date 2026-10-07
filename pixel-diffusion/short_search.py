@@ -105,7 +105,7 @@ def submit(st, run, sched, seed=0):
             f'TRAIN_EXTRA="{LR_FLAGS[st["lr"]]}"; nvidia-smi --query-gpu=name --format=csv,noheader; '
             f'bash {frozen} {run} slurm {seed} 0; cd {bo.REPO} && {py} short_search.py step --search {st["search"]}')
     cmd = ['sbatch', '--parsable', '-D', BASE, '-J', f'dyn_{run}', '-o', os.path.join(LOGDIR, f'{run}-%j.out'),
-           '-p', PART, '--gres=gpu:1', '--cpus-per-task=6', '--mem=14G', '-t', '05:00:00', '--requeue', '--wrap', wrap]
+           '-p', PART, '--gres=gpu:1', '--cpus-per-task=6', '--mem=14G', '-t', '03:00:00', '--requeue', '--wrap', wrap]
     r = bo.sh(cmd)
     return r.stdout.strip() or ('ERR ' + r.stderr.strip())
 
