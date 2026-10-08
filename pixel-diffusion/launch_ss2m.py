@@ -28,9 +28,19 @@ def path():
     return os.path.join(ss.STATE_DIR, 'ss2m.json')
 
 
-def submit(st, q, suffix=''):
+def fixed_from_end(x, short_kimg=500, full_kimg=2000):
+    """Last jump (latest group) keeps the same number of images before the end as in the short run; other jumps and
+    all levels unchanged. For 500 -> 2000 kimg: f -> 1 - (1 - f) / 4."""
+    x = list(x)
+    last = max(range(4), key=lambda i: x[i])
+    x[last] = round(1 - (1 - x[last]) * short_kimg / full_kimg, 4)
+    return x
+
+
+def submit(st, q, suffix='', x=None, nice=0, note='same fractions'):
     run = 'ss2m_' + q['name'][len('ss_'):] + suffix
-    bo.register(run, ss.schedule(q['x']), f"2000-kimg copy of {q['name']} ({st['search']}, LR {st['lr']})")
+    x = q['x'] if x is None else x
+    bo.register(run, ss.schedule(x), f"2000-kimg copy of {q['name']} ({st['search']}, LR {st['lr']}, {note})")
     os.makedirs(LOGDIR, exist_ok=True)
     frozen = os.path.join(LOGDIR, f'run_dyn_job.{run}.{int(time.time())}.sh')
     shutil.copy(os.path.join(bo.REPO, 'run_dyn_job.sh'), frozen)
@@ -40,7 +50,7 @@ def submit(st, q, suffix=''):
             f'TRAIN_EXTRA="{LR_FLAGS[st["lr"]]}"; nvidia-smi --query-gpu=name --format=csv,noheader; '
             f'bash {frozen} {run} slurm 0 0')
     cmd = ['sbatch', '--parsable', '-D', BASE, '-J', f'dyn_{run}', '-o', os.path.join(LOGDIR, f'{run}-%j.out'),
-           '-p', PART, '--gres=gpu:1', '--cpus-per-task=6', f'--mem={st.get("mem", "14G")}', '-t', '24:00:00', '--requeue', '--wrap', wrap]
+           '-p', PART, f'--nice={nice}', '--gres=gpu:1', '--cpus-per-task=6', f'--mem={st.get("mem", "14G")}', '-t', '24:00:00', '--requeue', '--wrap', wrap]
     return run, ss.sbatch(cmd)
 
 
@@ -82,6 +92,30 @@ def _update(search):
         bo.save(path(), log)
 
 
+def fixed_end(search, checks=(8, 12, 16)):
+    """Low-priority (nice) fixed-from-end versions of each checkpoint's top-1 pick: they start only on GPUs nobody
+    else wants. Names ss2m_<search>_NNN_fe."""
+    st = bo.load(ss.path(search), None)
+    byname = {q['name']: q for q in st['points']}
+    log = bo.load(path(), {})
+    mine = log.setdefault(search + '_fe', {'runs': {}})
+    for n in checks:
+        q = byname[log[search]['checks'][str(n)][0]]
+        if not mine['runs'].get(q['name'], {}).get('job', 'ERR').startswith('ERR'):
+            continue
+        x = fixed_from_end(q['x'])
+        run, job = submit(st, q, '_fe', x=x, nice=10000, note='fixed-from-end last jump')
+        mine['runs'][q['name']] = {'run': run, 'job': job, 'x': x, 'check': n, 'submitted': time.strftime('%F %T')}
+        print('submitted', run, job, 'x', x)
+    bo.save(path(), log)
+
+
 if __name__ == '__main__':
-    for s in sys.argv[1:]:
-        update(s)
+    if sys.argv[1] == 'fixed_end':          # python launch_ss2m.py fixed_end fda
+        import fcntl
+        with open(path() + '.lock', 'w') as lk:
+            fcntl.flock(lk, fcntl.LOCK_EX)
+            fixed_end(sys.argv[2])
+    else:
+        for s in sys.argv[1:]:
+            update(s)
