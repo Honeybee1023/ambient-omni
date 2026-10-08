@@ -28,13 +28,14 @@ def path():
     return os.path.join(ss.STATE_DIR, 'ss2m.json')
 
 
-def submit(st, q):
-    run = 'ss2m_' + q['name'][len('ss_'):]
+def submit(st, q, suffix=''):
+    run = 'ss2m_' + q['name'][len('ss_'):] + suffix
     bo.register(run, ss.schedule(q['x']), f"2000-kimg copy of {q['name']} ({st['search']}, LR {st['lr']})")
     os.makedirs(LOGDIR, exist_ok=True)
     frozen = os.path.join(LOGDIR, f'run_dyn_job.{run}.{int(time.time())}.sh')
     shutil.copy(os.path.join(bo.REPO, 'run_dyn_job.sh'), frozen)
-    wrap = (f'export AMBIENT_BASE={BASE} DYN_DATASET={FULL_DATASET} KEEP_LAST_DUMPS=2 '
+    # RUN_KIMG explicit: when called from a short job's step, the env would otherwise carry RUN_KIMG=500
+    wrap = (f'export AMBIENT_BASE={BASE} DYN_DATASET={FULL_DATASET} RUN_KIMG=2000 KEEP_LAST_DUMPS=2 '
             f'TRAIN_EXTRA="{LR_FLAGS[st["lr"]]}"; nvidia-smi --query-gpu=name --format=csv,noheader; '
             f'bash {frozen} {run} slurm 0 0')
     cmd = ['sbatch', '--parsable', '-D', BASE, '-J', f'dyn_{run}', '-o', os.path.join(LOGDIR, f'{run}-%j.out'),
@@ -72,8 +73,10 @@ def _update(search):
                                                                                    # (QOS submit limit): retry
                 if os.environ.get('SS2M_DRY'):
                     print('would submit', q['name'], round(q['mind'], 5), 'for check', n); continue
-                run, job = submit(st, q)
-                mine['runs'][q['name']] = {'run': run, 'job': job, 'submitted': time.strftime('%F %T')}
+                suffix = mine['runs'].get(q['name'], {}).get('suffix', '')     # set when a run had to be redone
+                run, job = submit(st, q, suffix)
+                mine['runs'][q['name']] = {'run': run, 'job': job, 'suffix': suffix,
+                                           'submitted': time.strftime('%F %T')}
                 print('submitted', run, job, 'for check', n)
     if not os.environ.get('SS2M_DRY'):
         bo.save(path(), log)
