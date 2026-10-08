@@ -12,6 +12,7 @@ the public mit_normal_gpu 6-h limit; Sloan allows ~24 submitted jobs per user).
 
 Usage (Engaging, via srun/sbatch):
     python launch_short.py build                      # make celeba_mix4_km_q4 (symlinks)
+    python launch_short.py build --src afhqdog_mix4_km --out afhqdog_mix4_km_q4
     python launch_short.py submit full km_056 ...     # short_full_km056 ...
     python launch_short.py submit quarter km_056 ...  # short_q4_km056 ...
 """
@@ -28,11 +29,11 @@ ARMS = {'full': (SRC, 'short_full_'), 'quarter': (Q4, 'short_q4_')}
 LOGDIR = os.path.join(BASE, 'train_logs', 'short')
 
 
-def build():
-    out = os.path.join(D, Q4)
+def build(src=SRC, q4=Q4):
+    out = os.path.join(D, q4)
     if os.path.exists(out):
         sys.exit(f'{out} exists')
-    rows = [json.loads(l) for l in open(os.path.join(D, SRC, 'annotations.jsonl'))]
+    rows = [json.loads(l) for l in open(os.path.join(D, src, 'annotations.jsonl'))]
     groups = {}
     for r in rows:
         groups.setdefault(r['filename'].split('_')[0], []).append(r)
@@ -45,10 +46,10 @@ def build():
     os.makedirs(out)
     with open(os.path.join(out, 'annotations.jsonl'), 'w') as f:
         for r in keep:
-            os.symlink(os.path.join(D, SRC, r['filename']), os.path.join(out, r['filename']))
+            os.symlink(os.path.join(D, src, r['filename']), os.path.join(out, r['filename']))
             f.write(json.dumps(r) + '\n')
     sizes = {g: sum(r['filename'].startswith(g + '_') for r in keep) for g in groups}
-    json.dump({'source': SRC, 'fraction': 0.25, 'seed': SEED, 'sizes': sizes}, open(out + '.meta.json', 'w'), indent=1)
+    json.dump({'source': src, 'fraction': 0.25, 'seed': SEED, 'sizes': sizes}, open(out + '.meta.json', 'w'), indent=1)
     print('wrote', out, sizes)
 
 
@@ -77,5 +78,7 @@ if __name__ == '__main__':
     ap.add_argument('cmd', choices=['build', 'submit'])
     ap.add_argument('arm', nargs='?', choices=list(ARMS))
     ap.add_argument('runs', nargs='*')
+    ap.add_argument('--src', default=SRC, help='build: source dataset (e.g. afhqdog_mix4_km)')
+    ap.add_argument('--out', default=Q4, help='build: name of the 1/4 copy (e.g. afhqdog_mix4_km_q4)')
     a = ap.parse_args()
-    build() if a.cmd == 'build' else submit(a.arm, a.runs)
+    build(a.src, a.out) if a.cmd == 'build' else submit(a.arm, a.runs)

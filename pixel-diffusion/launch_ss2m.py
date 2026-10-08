@@ -18,7 +18,7 @@ BASE = bo.BASE
 LOGDIR = os.path.join(BASE, 'train_logs', 'ss2m')
 CHECKS = (8, 12, 16, 20, 24, 32, 40)
 TOP = 3
-AUTO = ('q4a', 'q4b')
+AUTO = ('q4a', 'q4b', 'afq4')
 FULL_DATASET = 'celeba_mix4_km'
 LR_FLAGS = {'old': '', 'wu': '--lr=2e-4 --lr_rampup_kimg=100'}     # 2000-kimg versions of short_search.LR_FLAGS
 PART = 'ou_sloan_gpu,sched_mit_sloan_gpu_r8'
@@ -35,11 +35,12 @@ def submit(st, q, suffix=''):
     frozen = os.path.join(LOGDIR, f'run_dyn_job.{run}.{int(time.time())}.sh')
     shutil.copy(os.path.join(bo.REPO, 'run_dyn_job.sh'), frozen)
     # RUN_KIMG explicit: when called from a short job's step, the env would otherwise carry RUN_KIMG=500
-    wrap = (f'export AMBIENT_BASE={BASE} DYN_DATASET={FULL_DATASET} RUN_KIMG=2000 KEEP_LAST_DUMPS=2 '
+    wrap = (f'export AMBIENT_BASE={BASE} DYN_DATASET={st.get("full_dataset") or FULL_DATASET} RUN_KIMG=2000 '
+            f'KEEP_LAST_DUMPS=2 ' + ss.ref_env(st) +
             f'TRAIN_EXTRA="{LR_FLAGS[st["lr"]]}"; nvidia-smi --query-gpu=name --format=csv,noheader; '
             f'bash {frozen} {run} slurm 0 0')
     cmd = ['sbatch', '--parsable', '-D', BASE, '-J', f'dyn_{run}', '-o', os.path.join(LOGDIR, f'{run}-%j.out'),
-           '-p', PART, '--gres=gpu:1', '--cpus-per-task=6', '--mem=14G', '-t', '24:00:00', '--requeue', '--wrap', wrap]
+           '-p', PART, '--gres=gpu:1', '--cpus-per-task=6', f'--mem={st.get("mem", "14G")}', '-t', '24:00:00', '--requeue', '--wrap', wrap]
     r = bo.sh(cmd)
     return run, r.stdout.strip() or ('ERR ' + r.stderr.strip())
 

@@ -96,6 +96,12 @@ def propose_batch(st, rng):
     return np.array(out)
 
 
+def ref_env(st):
+    """MIND/FID reference (AFHQ scores against its own clean training dogs). Always set, empty = run_dyn_job.sh's
+    CelebA default, so a job submitted from inside another search's job never inherits that job's reference."""
+    return ''.join(f'{k}={st.get(v) or ""} ' for k, v in (('DYN_REF', 'ref'), ('DYN_REF_CACHE', 'ref_cache')))
+
+
 def submit(st, run, sched, seed=0):
     bo.register(run, sched, f"short search {st['search']} ({st['dataset']}, {st['run_kimg']} kimg, LR {st['lr']})")
     os.makedirs(LOGDIR, exist_ok=True)
@@ -103,10 +109,12 @@ def submit(st, run, sched, seed=0):
     shutil.copy(os.path.join(bo.REPO, 'run_dyn_job.sh'), frozen)
     py = os.path.join(BASE, 'miniconda3', 'envs', 'ambient', 'bin', 'python')
     wrap = (f'export AMBIENT_BASE={BASE} DYN_DATASET={st["dataset"]} RUN_KIMG={st["run_kimg"]} KEEP_LAST_DUMPS=2 '
+            + ref_env(st) +
             f'TRAIN_EXTRA="{LR_FLAGS[st["lr"]]}"; nvidia-smi --query-gpu=name --format=csv,noheader; '
             f'bash {frozen} {run} slurm {seed} 0; cd {bo.REPO} && {py} short_search.py step --search {st["search"]}')
     cmd = ['sbatch', '--parsable', '-D', BASE, '-J', f'dyn_{run}', '-o', os.path.join(LOGDIR, f'{run}-%j.out'),
-           '-p', PART, '--gres=gpu:1', '--cpus-per-task=6', '--mem=14G', '-t', '03:00:00', '--requeue', '--wrap', wrap]
+           '-p', PART, '--gres=gpu:1', '--cpus-per-task=6', f'--mem={st.get("mem", "14G")}', '-t', '03:00:00', '--requeue',
+           '--wrap', wrap]
     r = bo.sh(cmd)
     return r.stdout.strip() or ('ERR ' + r.stderr.strip())
 
@@ -167,7 +175,12 @@ def main():
     ap.add_argument('--run_kimg', type=int, default=500)
     ap.add_argument('--budget', type=int, default=40)
     ap.add_argument('--noise_log_sd', type=float, default=0.04, help='GP noise floor on log MIND (0.04 ~ 2 MIND units at 0.05)')
-    ap.add_argument('--source', help='noise: manifest name of the schedule to repeat with seed 1')
+    ap.add_argument('--source', help='noise: manifest name of the schedule to repeat')
+    ap.add_argument('--seed', type=int, default=1, help='noise: seed of the repeat (1 -> ss_<s>_noise, 0 -> _noise0)')
+    ap.add_argument('--full_dataset', default='celeba_mix4_km', help='dataset of the 2000-kimg copies (launch_ss2m)')
+    ap.add_argument('--ref', help='MIND/FID reference image dir (default: run_dyn_job.sh CelebA holdout)')
+    ap.add_argument('--ref_cache', help='MIND reference feature cache matching --ref')
+    ap.add_argument('--mem', default='14G')
     a = ap.parse_args()
     os.makedirs(STATE_DIR, exist_ok=True)
     if a.cmd == 'init':
@@ -175,16 +188,17 @@ def main():
             sys.exit('exists')
         bo.save(path(a.search), {'search': a.search, 'dataset': a.dataset, 'lr': a.lr, 'run_kimg': a.run_kimg,
                                  'budget': a.budget, 'noise_log_sd': a.noise_log_sd, 'seed': 1234, 'points': [],
-                                 'noise': [], 'picks': {}, 'created': time.strftime('%F %T')})
+                                 'noise': [], 'picks': {}, 'created': time.strftime('%F %T'),
+                                 'full_dataset': a.full_dataset, 'ref': a.ref, 'ref_cache': a.ref_cache, 'mem': a.mem})
         print('created', path(a.search))
     elif a.cmd == 'step':
         step(a.search)
     elif a.cmd == 'noise':
         st = bo.load(path(a.search), None)
         man = {e['name']: e for e in json.load(open(bo.MANIFEST))['runs']}
-        run = f"ss_{a.search}_noise"
-        job = submit(st, run, man[a.source]['schedule'], seed=1)
-        st['noise'].append({'name': run, 'source': a.source, 'seed': 1, 'job': job, 'mind': None, 'fid': None})
+        run = f"ss_{a.search}_noise" + ('' if a.seed == 1 else str(a.seed))
+        job = submit(st, run, man[a.source]['schedule'], seed=a.seed)
+        st['noise'].append({'name': run, 'source': a.source, 'seed': a.seed, 'job': job, 'mind': None, 'fid': None})
         bo.save(path(a.search), st); print('noise run', run, job)
     else:
         st = bo.load(path(a.search), None)
