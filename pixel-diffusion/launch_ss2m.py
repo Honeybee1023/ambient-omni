@@ -64,7 +64,8 @@ def _update(search):
         top = sorted(pts[:n], key=lambda q: q['mind'])[:TOP]
         mine['checks'][str(n)] = [q['name'] for q in top]
         for q in top:
-            if q['name'] not in mine['runs']:
+            if mine['runs'].get(q['name'], {}).get('job', 'ERR').startswith('ERR'):   # new, or a failed sbatch
+                                                                                   # (QOS submit limit): retry
                 if os.environ.get('SS2M_DRY'):
                     print('would submit', q['name'], round(q['mind'], 5), 'for check', n); continue
                 run, job = submit(st, q)

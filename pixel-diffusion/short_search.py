@@ -130,6 +130,12 @@ def step(search):
         for q in st['points'] + st.get('noise', []):
             if q.get('mind') is None:
                 q['mind'], q['fid'] = mind_fid(q['name'], q.get('seed', 0))
+        for q in st['points'] + st.get('noise', []):     # a failed sbatch (e.g. the QOS submit limit) is retried
+            if q.get('mind') is None and str(q.get('job', '')).startswith('ERR'):
+                sched = (schedule(q['x']) if q.get('x') else
+                         {e['name']: e for e in json.load(open(bo.MANIFEST))['runs']}[q['source']]['schedule'])
+                q['job'] = submit(st, q['name'], sched, seed=q.get('seed', 0))
+                print('resubmitted', q['name'], q['job'])
         pending = [q for q in st['points'] if q.get('mind') is None]
         if (not pending and len(st['points']) < st['budget'] and not st.get('paused')
                 and not os.path.exists(os.path.join(STATE_DIR, 'PAUSE'))):
