@@ -58,11 +58,15 @@ def _update(search):
             q['mind'], q['fid'] = ss.mind_fid(q['name'])
     log = bo.load(path(), {})
     mine = log.setdefault(search, {'checks': {}, 'runs': {}})
+    byname = {q['name']: q for q in pts}
     for n in CHECKS:
-        if str(n) in mine['checks'] or len(pts) < n or any(q.get('mind') is None for q in pts[:n]):
+        if str(n) in mine['checks']:                 # already decided; still retry any of its failed submissions
+            top = [byname[k] for k in mine['checks'][str(n)]]
+        elif len(pts) < n or any(q.get('mind') is None for q in pts[:n]):
             continue
-        top = sorted(pts[:n], key=lambda q: q['mind'])[:TOP]
-        mine['checks'][str(n)] = [q['name'] for q in top]
+        else:
+            top = sorted(pts[:n], key=lambda q: q['mind'])[:TOP]
+            mine['checks'][str(n)] = [q['name'] for q in top]
         for q in top:
             if mine['runs'].get(q['name'], {}).get('job', 'ERR').startswith('ERR'):   # new, or a failed sbatch
                                                                                    # (QOS submit limit): retry
