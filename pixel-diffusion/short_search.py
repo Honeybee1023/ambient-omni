@@ -115,8 +115,17 @@ def submit(st, run, sched, seed=0):
     cmd = ['sbatch', '--parsable', '-D', BASE, '-J', f'dyn_{run}', '-o', os.path.join(LOGDIR, f'{run}-%j.out'),
            '-p', PART, '--gres=gpu:1', '--cpus-per-task=6', f'--mem={st.get("mem", "14G")}', '-t', '03:00:00', '--requeue',
            '--wrap', wrap]
+    return sbatch(cmd)
+
+
+def sbatch(cmd):
+    """sbatch; if ou_sloan_gpu's per-user submit limit (24, QOS) is hit, fall back to the A100 partition, which has no
+    such QOS. Returns the job id or 'ERR ...' (then step/launch_ss2m retry later)."""
     r = bo.sh(cmd)
-    return r.stdout.strip() or ('ERR ' + r.stderr.strip())
+    if r.returncode != 0 and 'QOSMaxSubmitJobPerUserLimit' in r.stderr:
+        i = cmd.index('-p')
+        r = bo.sh(cmd[:i + 1] + ['sched_mit_sloan_gpu_r8'] + cmd[i + 2:])
+    return r.stdout.strip() if r.returncode == 0 else 'ERR ' + r.stderr.strip()
 
 
 def mind_fid(run, seed=0):

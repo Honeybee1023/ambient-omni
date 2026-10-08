@@ -41,8 +41,7 @@ def submit(st, q, suffix=''):
             f'bash {frozen} {run} slurm 0 0')
     cmd = ['sbatch', '--parsable', '-D', BASE, '-J', f'dyn_{run}', '-o', os.path.join(LOGDIR, f'{run}-%j.out'),
            '-p', PART, '--gres=gpu:1', '--cpus-per-task=6', f'--mem={st.get("mem", "14G")}', '-t', '24:00:00', '--requeue', '--wrap', wrap]
-    r = bo.sh(cmd)
-    return run, r.stdout.strip() or ('ERR ' + r.stderr.strip())
+    return run, ss.sbatch(cmd)
 
 
 def update(search):
