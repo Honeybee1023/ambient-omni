@@ -50,6 +50,9 @@ def build(src=SRC, q4=Q4):
         for r in keep:
             os.symlink(os.path.join(D, src, r['filename']), os.path.join(out, r['filename']))
             f.write(json.dumps(r) + '\n')
+    for side in ('sigmas.txt', 'threshold_summary.json'):   # train.py needs sigmas.txt to read per-image probabilities
+        if os.path.exists(os.path.join(D, src, side)):
+            shutil.copy(os.path.join(D, src, side), out)
     sizes = {g: sum(r['filename'].startswith(g + '_') for r in keep) for g in groups}
     json.dump({'source': src, 'fraction': 0.25, 'seed': SEED, 'sizes': sizes}, open(out + '.meta.json', 'w'), indent=1)
     print('wrote', out, sizes)
