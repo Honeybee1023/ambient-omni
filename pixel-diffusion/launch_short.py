@@ -15,6 +15,8 @@ Usage (Engaging, via srun/sbatch):
     python launch_short.py build --src afhqdog_mix4_km --out afhqdog_mix4_km_q4
     python launch_short.py submit full km_056 ...     # short_full_km056 ...
     python launch_short.py submit quarter km_056 ...  # short_q4_km056 ...
+    python launch_short.py copy SRC_RUN NEW_RUN DATASET --extra "--lr=2e-4 --lr_rampup_kimg=25" [--ref DIR --ref_cache NPZ]
+                                                      # 500-kimg copy of any registered run (e.g. a baseline)
 """
 import argparse, json, os, random, shutil, sys, time
 
@@ -73,12 +75,39 @@ def submit(arm, src_runs):
         print(run, r.stdout.strip() or r.stderr.strip())
 
 
+def copy(src_run, run, dataset, extra, ref='', ref_cache='', mem='14G'):
+    """500-kimg copy of any registered run's schedule (e.g. a baseline) on any dataset, for the short-vs-full plot.
+    Every env var is set explicitly: a submit from inside a job would otherwise inherit that job's settings."""
+    man = {e['name']: e for e in json.load(open(bo.MANIFEST))['runs']}
+    bo.register(run, man[src_run]['schedule'], f'500-kimg copy of {src_run} on {dataset} ({extra})')
+    os.makedirs(LOGDIR, exist_ok=True)
+    frozen = os.path.join(LOGDIR, f'run_dyn_job.{run}.{int(time.time())}.sh')
+    shutil.copy(os.path.join(bo.REPO, 'run_dyn_job.sh'), frozen)
+    wrap = (f'export AMBIENT_BASE={BASE} DYN_DATASET={dataset} RUN_KIMG={SHORT_KIMG} KEEP_LAST_DUMPS=2 '
+            f'DYN_REF={ref} DYN_REF_CACHE={ref_cache} TRAIN_EXTRA="{extra}"; '
+            f'nvidia-smi --query-gpu=name --format=csv,noheader; bash {frozen} {run} slurm 0 0')
+    cmd = ['sbatch', '--parsable', '-D', BASE, '-J', f'dyn_{run}', '-o', os.path.join(LOGDIR, f'{run}-%j.out'),
+           '-p', os.environ.get('SHORT_PART', 'ou_sloan_gpu,sched_mit_sloan_gpu_r8,mit_preemptable'), '--gres=gpu:1',
+           '--cpus-per-task=6', f'--mem={mem}', '-t', '03:00:00', '--requeue', '--wrap', wrap]
+    r = bo.sh(cmd)
+    print(run, r.stdout.strip() or r.stderr.strip())
+
+
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['build', 'submit'])
-    ap.add_argument('arm', nargs='?', choices=list(ARMS))
+    ap.add_argument('cmd', choices=['build', 'submit', 'copy'])
+    ap.add_argument('arm', nargs='?')
     ap.add_argument('runs', nargs='*')
+    ap.add_argument('--extra', default='', help='copy: TRAIN_EXTRA for the short run')
+    ap.add_argument('--ref', default='', help='copy: MIND reference dir (empty = CelebA default)')
+    ap.add_argument('--ref_cache', default='')
+    ap.add_argument('--mem', default='14G')
     ap.add_argument('--src', default=SRC, help='build: source dataset (e.g. afhqdog_mix4_km)')
     ap.add_argument('--out', default=Q4, help='build: name of the 1/4 copy (e.g. afhqdog_mix4_km_q4)')
     a = ap.parse_args()
-    build(a.src, a.out) if a.cmd == 'build' else submit(a.arm, a.runs)
+    if a.cmd == 'build':
+        build(a.src, a.out)
+    elif a.cmd == 'copy':          # copy SRC_RUN NEW_RUN DATASET
+        copy(a.arm, a.runs[0], a.runs[1], a.extra, a.ref, a.ref_cache, a.mem)
+    else:
+        submit(a.arm, a.runs)
