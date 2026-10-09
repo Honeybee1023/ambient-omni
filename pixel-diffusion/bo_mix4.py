@@ -235,7 +235,14 @@ def propose(done_X, done_y, pending_X, n_seen, sobol_seed, seed):
 
 # ------------------------------------------------------------------------------------ slurm --
 
+# mit_preemptable has RTX PRO 6000 (Blackwell, sm_120) nodes; the env's torch 2.6+cu124 has no kernels for them, so a job
+# landing there dies in minutes ("no kernel image is available"). Every sbatch from these scripts excludes them.
+NO_KERNEL_NODES = 'node[4004,4007-4008,5003-5005,5101,5103-5104,5106,5202-5204]'
+
+
 def sh(cmd):
+    if cmd and cmd[0] == 'sbatch' and not any(c.startswith(('-x', '--exclude')) for c in cmd):
+        cmd = cmd[:1] + ['--exclude=' + NO_KERNEL_NODES] + cmd[1:]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
