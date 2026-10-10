@@ -80,6 +80,11 @@ def main():
     ap.add_argument("--clean_prefix", default=DEFAULT_CLEAN_PREFIX)
     ap.add_argument("--corrupt_prefix", default=DEFAULT_CORRUPT_PREFIX,
                     help="e.g. bX_ for a directory of held-out faces blurred at a control strength; comma-separate several (g03_,g05_,g10_,g20_)")
+    ap.add_argument("--shard", default=None,
+                    help="K/N: annotate only every N-th blurred image starting at K, into annotations.shardK.jsonl "
+                         "(run N jobs in parallel, then once more with --merge N)")
+    ap.add_argument("--merge", type=int, default=None,
+                    help="N: concatenate annotations.shard0..N-1.jsonl into annotations.jsonl and write the summary")
     args = ap.parse_args()
     # Comma-separated prefixes annotate several blur groups in one pass (g03_,g05_,...);
     # str.startswith takes a tuple, so a single prefix behaves exactly as before.
@@ -90,6 +95,9 @@ def main():
         print(f"EMA window scaled to the {args.num_sigmas}-point grid: {args.cls_ema_window}")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    if args.merge:
+        merge_shards(args, device)
+        return
     # Build the network from training_options.json and copy the EMA weights in,
     # exactly as annotate.py does. Unpickling the snapshot directly re-executes
     # the network's source through torch_utils.persistence, which fails outside
@@ -139,6 +147,12 @@ def main():
           f"({args.num_sigmas} sigmas x {args.num_trials_per_t} trials)")
 
     ann_path = os.path.join(args.out, "annotations.jsonl")
+    if args.shard:
+        k, n = (int(v) for v in args.shard.split("/"))
+        corrupt = corrupt[k::n]
+        clean = clean if k == 0 else []              # shard 0 carries the clean lines
+        ann_path = os.path.join(args.out, f"annotations.shard{k}.jsonl")
+        print(f"shard {k}/{n}: {len(corrupt)} blurred images -> {ann_path}")
     done = set()
     if os.path.exists(ann_path):                    # resumable
         with open(ann_path) as f:
@@ -186,7 +200,12 @@ def main():
                 print(f"  {i + 1}/{len(corrupt)}  {rate:.1f} img/s  eta {(len(corrupt) - i - 1) / rate / 60:.0f} min")
             out.flush()
 
-    if thresholds:
+    if thresholds and not args.shard:
+        write_summary(args, thresholds, device)
+
+
+def write_summary(args, thresholds, device):
+    if True:
         sig = np.array(thresholds)
         T = np.array([sigma_min_to_t(s) for s in sig])
         q = lambda a, p: float(np.quantile(a, p))
@@ -206,6 +225,35 @@ def main():
               f"q90 {summary['T']['q90']:.3f}   (n={len(sig)})")
         print(f"  MIND-optimal static T from the sweep: 0.50")
         print(f"wrote {os.path.join(args.out, 'threshold_summary.json')}")
+
+
+def merge_shards(args, device):
+    """Concatenate the shard files (each image exactly once) and recompute every threshold from the stored
+    probabilities with the same reduction, so the summary is identical to an unsharded run's."""
+    sigmas = torch.tensor([float(l) for l in open(os.path.join(args.out, "sigmas.txt"))], device=device)
+    lines, seen, thresholds = [], set(), []
+    for k in range(args.merge):
+        path = os.path.join(args.out, f"annotations.shard{k}.jsonl")
+        for line in open(path):
+            r = json.loads(line)
+            if r["filename"] in seen:
+                continue
+            seen.add(r["filename"])
+            lines.append(line if line.endswith("\n") else line + "\n")
+            if "probabilities" in r:
+                p = apply_ema(np.array(r["probabilities"]).mean(axis=-1), window=args.cls_ema_window)
+                thresholds.append(float(analyze_classifier_trajectory(torch.tensor(p).to(device), sigmas,
+                                                                      epsilon=args.cls_epsilon)["first_confusion"]))
+    files = sorted(f for f in os.listdir(args.dataset_path) if f.endswith((".jpg", ".png")))
+    CORRUPT_PREFIX = tuple(p for p in args.corrupt_prefix.split(",") if p)
+    want = [f for f in files if f.startswith(CORRUPT_PREFIX) or f.startswith(args.clean_prefix)]
+    missing = set(want) - seen
+    if missing:
+        raise SystemExit(f"{len(missing)} images have no annotation yet (e.g. {sorted(missing)[:3]}); not merging")
+    with open(os.path.join(args.out, "annotations.jsonl"), "w") as f:
+        f.writelines(lines)
+    print(f"merged {len(lines)} annotations from {args.merge} shards")
+    write_summary(args, thresholds, device)
 
 
 if __name__ == "__main__":
