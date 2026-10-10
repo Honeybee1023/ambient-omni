@@ -3,7 +3,8 @@
 # each a valid run of that length, used to find where training stops improving.
 # Usage (inside a 4-GPU Slurm allocation): bash run_curve.sh <name>
 #   env CURVE_DATA     dataset folder under annotated_datasets (required)
-#       CURVE_SCHED    per_group schedule JSON with phases at 0 only (static), or "none"
+#       CURVE_SCHED    off (blurred groups never used = clean-only) | annot (Ambient-o per-image thresholds) | none.
+#                      A name, not JSON: sbatch --export splits values at commas.
 #       CURVE_DROPOUT  0.05 for CelebA (EDM FFHQ-64), 0.25 for AFHQ (EDM AFHQv2-64)   (required)
 #       CURVE_MIMG     total length in Mimg (default 20.48 = 40 snapshots of 512 kimg). Raising it later
 #                      and resubmitting continues exactly where the run stopped.
@@ -46,8 +47,13 @@ fi
 NGPU=$(python -c "import torch;print(torch.cuda.device_count())")
 [ "$NGPU" = 4 ] || { echo "ERROR: curve runs need exactly 4 GPUs (batch 256 = 4 x 64), got $NGPU"; exit 1; }
 [ -f "$DATA/annotations.jsonl" ] || { echo "ERROR: no $DATA/annotations.jsonl"; exit 1; }
-SCHED=${CURVE_SCHED:-none}
-if [ "$SCHED" = none ]; then SCHED_ARG=(); else SCHED_ARG=(--t_schedule="$SCHED"); fi
+case "${CURVE_SCHED:-none}" in
+    none)  SCHED="" ;;
+    off|annot) P=${CURVE_SCHED}; SCHED='{"type":"per_group","groups":{"g03":{"phases":[[0,"'$P'"]]},"g05":{"phases":[[0,"'$P'"]]},"g10":{"phases":[[0,"'$P'"]]},"g20":{"phases":[[0,"'$P'"]]}}}' ;;
+    *) echo "ERROR: CURVE_SCHED must be off, annot or none"; exit 1 ;;
+esac
+if [ -z "$SCHED" ]; then SCHED_ARG=(); else SCHED_ARG=(--t_schedule="$SCHED"); fi
+source ./gpu_preflight.sh && gpu_preflight
 
 mkdir -p "$RUNDIR"
 RESUME=""
@@ -55,7 +61,7 @@ STATE=$(ls -1 "$RUNDIR"/training-state-*.pt 2>/dev/null | sort -V | tail -1)
 [ -n "$STATE" ] && RESUME="--resume=$STATE"
 echo "=== curve $NAME | $(hostname) | $(date) ==="
 echo "    data $DATA ($(wc -l < "$DATA/annotations.jsonl") annotations) | dropout $CURVE_DROPOUT | to ${MIMG} Mimg"
-echo "    schedule: $SCHED | extra: ${CURVE_EXTRA:-} | ${RESUME:-fresh start}"
+echo "    schedule: ${SCHED:-none} | extra: ${CURVE_EXTRA:-} | ${RESUME:-fresh start}"
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
 
 python -m torch.distributed.run --standalone --nproc_per_node=4 train.py \

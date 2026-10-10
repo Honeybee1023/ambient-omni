@@ -42,6 +42,7 @@ TARGET_KIMG=$(awk "BEGIN{printf \"%d\", ${CLS_MIMG}*1000}")
 LASTK=$(ls -1 "$OUT"/network-snapshot-*.pkl 2>/dev/null | sort -V | tail -1 | sed 's/.*snapshot-0*\([0-9][0-9]*\)\.pkl/\1/')
 if [ "${LASTK:-0}" -ge "$TARGET_KIMG" ]; then echo "classifier at ${LASTK} >= ${TARGET_KIMG} kimg; finished, nothing to do."; exit 0; fi
 [ -f "${DATA}/cls_labels.jsonl" ] || { echo "ERROR: no ${DATA}/cls_labels.jsonl"; exit 1; }
+source ./gpu_preflight.sh && gpu_preflight
 NGPU=$(python -c "import torch;print(torch.cuda.device_count())")
 mkdir -p "$OUT"
 RESUME=""
