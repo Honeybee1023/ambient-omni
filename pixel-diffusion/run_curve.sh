@@ -1,7 +1,7 @@
 #!/bin/bash
 # Training-curve run (deployment-length phase, 2026-10-10): ONE long constant-LR run whose snapshots are
 # each a valid run of that length, used to find where training stops improving.
-# Usage (inside a 4-GPU Slurm allocation): bash run_curve.sh <name>
+# Usage (inside a 2- or 4-GPU Slurm allocation): bash run_curve.sh <name>
 #   env CURVE_DATA     dataset folder under annotated_datasets (required)
 #       CURVE_SCHED    off (blurred groups never used = clean-only) | annot (Ambient-o per-image thresholds) | none.
 #                      A name, not JSON: sbatch --export splits values at commas.
@@ -45,7 +45,9 @@ if ls "$RUNDIR"/network-snapshot-*.pkl >/dev/null 2>&1; then
     if [ "${LAST:-0}" -ge "$FINAL_KIMG" ]; then echo "$NAME already at ${LAST} kimg >= ${FINAL_KIMG}; nothing to do."; exit 0; fi
 fi
 NGPU=$(python -c "import torch;print(torch.cuda.device_count())")
-[ "$NGPU" = 4 ] || { echo "ERROR: curve runs need exactly 4 GPUs (batch 256 = 4 x 64), got $NGPU"; exit 1; }
+# Total batch is always 256; 2 GPUs = 128 each, 4 GPUs = 64 each (no accumulation either way). A run may move
+# between the two at a resume.
+case "$NGPU" in 2|4) ;; *) echo "ERROR: curve runs need 2 or 4 GPUs (batch 256), got $NGPU"; exit 1 ;; esac
 [ -f "$DATA/annotations.jsonl" ] || { echo "ERROR: no $DATA/annotations.jsonl"; exit 1; }
 case "${CURVE_SCHED:-none}" in
     none)  SCHED="" ;;
@@ -64,7 +66,9 @@ echo "    data $DATA ($(wc -l < "$DATA/annotations.jsonl") annotations) | dropou
 echo "    schedule: ${SCHED:-none} | extra: ${CURVE_EXTRA:-} | ${RESUME:-fresh start}"
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
 
-python -m torch.distributed.run --standalone --nproc_per_node=4 train.py \
+# Self-requeue before a partition time limit (submit with --requeue --signal=B:USR1@600); resumes from the newest dump.
+trap 'echo "time limit near: requeueing $SLURM_JOB_ID"; kill $TRAIN_PID 2>/dev/null; scontrol requeue $SLURM_JOB_ID; exit 0' USR1
+python -m torch.distributed.run --standalone --nproc_per_node="$NGPU" train.py \
     --outdir="$RUNDIR" --nosubdir --data="$DATA" --expr_id="curve_${NAME}" \
     --cond=0 --arch=ddpmpp --precond=edm --cres=1,2,2,2 \
     --batch=256 --lr=2e-4 --lr_rampup_kimg=100 --ema=0.5 \
@@ -72,7 +76,9 @@ python -m torch.distributed.run --standalone --nproc_per_node=4 train.py \
     --tick=64 --snap=8 --dump=8 \
     --corruption_probability=0.0 --noise_config=identity --s_max=4 \
     --cache=False --workers=8 --duration="$MIMG" --seed=0 \
-    "${SCHED_ARG[@]}" $RESUME ${CURVE_EXTRA:-}
+    "${SCHED_ARG[@]}" $RESUME ${CURVE_EXTRA:-} &
+TRAIN_PID=$!
+wait $TRAIN_PID
 rc=$?
 echo "=== curve $NAME exit $rc | $(date) ==="
 exit $rc
