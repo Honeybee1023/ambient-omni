@@ -81,7 +81,7 @@ N_SNAP=$(ls "$RUNDIR"/network-snapshot-*.pkl 2>/dev/null | grep -v 'snapshot-000
 echo "=== $NAME scored $DONE_ALL of $N_SNAP snapshots; training at ${LAST:-0} of $FINAL kimg | $(date) ==="
 if [ "${CURVE_EVAL_RESUBMIT:-1}" = 1 ] && { [ "${LAST:-0}" -lt "$FINAL" ] || [ "$DONE_ALL" -lt "$N_SNAP" ]; } && [ -n "${SLURM_JOB_ID:-}" ]; then
     # same Blackwell exclusion as bo_mix4.sh: torch 2.6+cu124 has no sm_120 kernels
-    sbatch --begin=now+2hours --exclude='node[4004,4007-4008,5003-5005,5101,5103-5104,5106,5202-5204]'  $(scontrol show job "$SLURM_JOB_ID" -o | grep -o 'Partition=[^ ]*' | sed 's/Partition=/-p /') \
+    sbatch --begin=now+2hours --exclude='node[4004,4007-4008,5003-5005,5101,5103-5104,5106,5202-5204]'  -p sched_mit_sloan_gpu_r8,ou_sloan_gpu,mit_normal_gpu \
         --gres=gpu:1 -c 8 --mem=96G -t 06:00:00 -J "ceval_${NAME}" \
         -o "${AMBIENT_BASE}/train_logs/curve/eval_${NAME}-%j.out" \
         --export=ALL --wrap "bash ${AMBIENT_BASE}/ambient-omni/pixel-diffusion/run_curve_eval.sh ${NAME}"
