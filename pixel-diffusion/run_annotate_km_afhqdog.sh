@@ -18,7 +18,9 @@ export PATH=${AMBIENT_BASE}/miniconda3/envs/ambient/bin:$PATH
 export PYTHONPATH=${AMBIENT_BASE}/ambient-omni/pixel-diffusion
 cd "${AMBIENT_BASE}/ambient-omni/pixel-diffusion" || exit 1
 D=${AMBIENT_BASE}/annotated_datasets
-CKPT=${AMBIENT_BASE}/train_outputs/${CLS_OUT:-cls_mix4_afhqdog}/network-snapshot-007680.pkl
+# CLS_CKPT: the classifier snapshot (default: the original 7.68-Mimg one). ANN_SRC / ANN_OUT / KM_OUT: dataset names.
+CKPT=${CLS_CKPT:-${AMBIENT_BASE}/train_outputs/${CLS_OUT:-cls_mix4_afhqdog}/network-snapshot-007680.pkl}
+SRC=${ANN_SRC:-afhqdog_mix4_v1}; AMB=${ANN_OUT:-afhqdog_mix4_ambo}; KM=${KM_OUT:-afhqdog_mix4_km}
 [ -f "$CKPT" ] || { echo "ERROR: classifier not finished, no $CKPT"; exit 1; }
 echo "=== annotate + k-means | $(hostname) | $(date) ==="
 python -c "
@@ -29,18 +31,18 @@ for b in range(4):
     if k in L[-1]: print(f'  classifier {k} (mean of last 5 ticks): {sum(r[k][\"mean\"] for r in L[-5:])/5:.4f}   (chance 0.693)')
 "
 
-if [ ! -f "$D/afhqdog_mix4_ambo/threshold_summary.json" ]; then
+if [ ! -f "$D/$AMB/threshold_summary.json" ]; then
     python analysis/annotate_precorrupted.py \
         --checkpoint_path "$CKPT" \
-        --dataset_path "$D/afhqdog_mix4_v1" \
-        --out "$D/afhqdog_mix4_ambo" \
+        --dataset_path "$D/$SRC" \
+        --out "$D/$AMB" \
         --num_sigmas 64 --num_trials_per_t 4 \
         --clean_prefix b0_ --corrupt_prefix g03_,g05_,g10_,g20_ || exit 1
 fi
-cat "$D/afhqdog_mix4_ambo/threshold_summary.json"
+cat "$D/$AMB/threshold_summary.json"
 
-if [ ! -f "$D/afhqdog_mix4_km/km_assignment.json" ]; then
-    python dataset_creation/create_km_dataset.py --src afhqdog_mix4_v1 --ambo afhqdog_mix4_ambo \
-        --name afhqdog_mix4_km || exit 1
+if [ ! -f "$D/$KM/km_assignment.json" ]; then
+    python dataset_creation/create_km_dataset.py --src $SRC --ambo $AMB \
+        --name $KM || exit 1
 fi
 echo "=== done | $(date) ==="

@@ -322,7 +322,12 @@ def training_loop(
     images_to_save = [torch.tensor(dataset_obj[i]['image']) for i in indices]
     if dist.get_rank() == 0:
         ambient_utils.save_images(torch.stack(images_to_save), os.path.join(run_dir, "dataset.png"), save_wandb=True)
- 
+    # ambient_utils' __getitem__ reseeds the GLOBAL numpy and torch (CPU+CUDA) RNGs with the image index, and the
+    # preview above ran it in this process. Without reseeding here, every rank, every --seed and every resume would
+    # share one sigma/noise stream (and --seed would not change the network init). Mix in rank and resume point.
+    np.random.seed((seed * dist.get_world_size() + dist.get_rank() + 1000003 * int(resume_kimg)) % (1 << 31))
+    torch.manual_seed(np.random.randint(1 << 31))
+
     # check if there is a file annotations.jsonl in the dataset_kwargs.path
     annotations_file = os.path.join(dataset_kwargs["path"], "annotations.jsonl")
     annotations = defaultdict(lambda: (0., 0.))
@@ -419,8 +424,8 @@ def training_loop(
     dataset_sampler = misc.InfiniteSampler(
         dataset=dataset_obj, 
         rank=dist.get_rank(), 
-        num_replicas=dist.get_world_size(), 
-        seed=seed,
+        num_replicas=dist.get_world_size(),
+        seed=(seed + 1000003 * int(resume_kimg)) % (1 << 31),  # a resumed run must not replay the first segment's data order
         **sampler_kwargs,
     )
     print('Constructed sampler')
@@ -895,12 +900,14 @@ def training_loop(
             # KEEP_LAST_DUMPS=k keeps only the k newest resumable checkpoints (state dump + its
             # same-kimg snapshot). Dumping every tick for preemption otherwise leaves ~36GB per
             # run until it finishes, which a shared 1TB scratch cannot hold for 20 runs at once.
+            # KEEP_SNAPSHOTS=1 prunes only the state dumps and keeps every network snapshot (training curves).
             keep = int(os.environ.get('KEEP_LAST_DUMPS', '0'))
+            keep_snaps = os.environ.get('KEEP_SNAPSHOTS', '0') == '1'
             if keep > 0:
                 dumps = sorted(f for f in os.listdir(run_dir) if re.fullmatch(r'training-state-\d{6}\.pt', f))
                 for old in dumps[:-keep]:
                     kimg_tag = old[len('training-state-'):-len('.pt')]
-                    for stale in (old, f'network-snapshot-{kimg_tag}.pkl'):
+                    for stale in (old,) if keep_snaps else (old, f'network-snapshot-{kimg_tag}.pkl'):
                         try:
                             os.remove(os.path.join(run_dir, stale))
                         except FileNotFoundError:

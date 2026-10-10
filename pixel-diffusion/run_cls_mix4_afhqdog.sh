@@ -34,8 +34,13 @@ cd "${AMBIENT_BASE}/ambient-omni/pixel-diffusion" || exit 1
 CLS_ID=${CLS_ID:-cls_mix4_afhqdog}
 DATA="${AMBIENT_BASE}/annotated_datasets/${CLS_DATA:-afhqdog_cls_mix4}"
 OUT="${AMBIENT_BASE}/train_outputs/${CLS_OUT:-cls_mix4_afhqdog}"
-FINAL="$OUT/network-snapshot-007680.pkl"
-if [ -f "$FINAL" ]; then echo "$FINAL exists; classifier finished, nothing to do."; exit 0; fi
+# CLS_MIMG: training length. 7.68 = our first classifiers (15k iterations x 512); 15.053 = the snapshot the
+# Ambient-o release annotates with (scripts/annotate_noise_classifier/*_15k.sh: network-snapshot-015053 is
+# kimg, i.e. 15 Mimg, not 15k iterations). The final snapshot can land a few kimg past the target.
+CLS_MIMG=${CLS_MIMG:-7.68}
+TARGET_KIMG=$(awk "BEGIN{printf \"%d\", ${CLS_MIMG}*1000}")
+LASTK=$(ls -1 "$OUT"/network-snapshot-*.pkl 2>/dev/null | sort -V | tail -1 | sed 's/.*snapshot-0*\([0-9][0-9]*\)\.pkl/\1/')
+if [ "${LASTK:-0}" -ge "$TARGET_KIMG" ]; then echo "classifier at ${LASTK} >= ${TARGET_KIMG} kimg; finished, nothing to do."; exit 0; fi
 [ -f "${DATA}/cls_labels.jsonl" ] || { echo "ERROR: no ${DATA}/cls_labels.jsonl"; exit 1; }
 NGPU=$(python -c "import torch;print(torch.cuda.device_count())")
 mkdir -p "$OUT"
@@ -50,4 +55,4 @@ python -m torch.distributed.run --standalone --nproc_per_node="$NGPU" train.py \
     --cond=0 --arch=ddpmpp --batch=512 --lr=1e-4 \
     --tick=40 --snap=5 --dump=5 \
     --corruption_probability=0.0 --noise_config=identity --s_max=4 \
-    --cache=False --duration=7.68 --seed=0 --workers=8 $RESUME ${CLS_EXTRA:-}
+    --cache=False --duration=${CLS_MIMG} --seed=0 --workers=8 $RESUME ${CLS_EXTRA:-}
