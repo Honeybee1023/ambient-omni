@@ -50,10 +50,15 @@ STATE=$(ls -1 "$OUT"/training-state-*.pt 2>/dev/null | sort -V | tail -1)
 [ -n "$STATE" ] && RESUME="--resume=$STATE" && echo "resuming from $(basename "$STATE")"
 echo "=== ${CLS_ID} | ${NGPU} GPUs | $(hostname) | $(date) ==="
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
+# Self-requeue before a partition time limit (submit with --requeue --signal=B:USR1@600): the job keeps its ID,
+# so jobs that depend on it (annotation) stay wired, and it resumes from the newest state dump.
+trap 'echo "time limit near: requeueing $SLURM_JOB_ID"; kill $TRAIN_PID 2>/dev/null; scontrol requeue $SLURM_JOB_ID; exit 0' USR1
 python -m torch.distributed.run --standalone --nproc_per_node="$NGPU" train.py \
     --outdir="$OUT" --nosubdir --data="$DATA" --expr_id="$CLS_ID" \
     --precond=edmcls --overwrite_cls_labels_path="${DATA}/cls_labels.jsonl" \
     --cond=0 --arch=ddpmpp --batch=512 --lr=1e-4 \
     --tick=40 --snap=5 --dump=5 \
     --corruption_probability=0.0 --noise_config=identity --s_max=4 \
-    --cache=False --duration=${CLS_MIMG} --seed=0 --workers=8 $RESUME ${CLS_EXTRA:-}
+    --cache=False --duration=${CLS_MIMG} --seed=0 --workers=8 $RESUME ${CLS_EXTRA:-} &
+TRAIN_PID=$!
+wait $TRAIN_PID
