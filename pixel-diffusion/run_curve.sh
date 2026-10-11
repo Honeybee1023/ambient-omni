@@ -67,6 +67,8 @@ echo "    schedule: ${SCHED:-none} | extra: ${CURVE_EXTRA:-} | ${RESUME:-fresh s
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
 
 # Self-requeue before a partition time limit (submit with --requeue --signal=B:USR1@600); resumes from the newest dump.
+# With sbatch --wrap, use --wrap "exec bash run_curve.sh ..." -- B:USR1 goes only to the batch shell, so a plain
+# "bash run_curve.sh" leaves sh (no trap) as that shell and the job just dies at the limit.
 trap 'echo "time limit near: requeueing $SLURM_JOB_ID"; kill $TRAIN_PID 2>/dev/null; scontrol requeue $SLURM_JOB_ID; exit 0' USR1
 python -m torch.distributed.run --standalone --nproc_per_node="$NGPU" train.py \
     --outdir="$RUNDIR" --nosubdir --data="$DATA" --expr_id="curve_${NAME}" \

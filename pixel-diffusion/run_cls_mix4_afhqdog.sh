@@ -52,6 +52,8 @@ echo "=== ${CLS_ID} | ${NGPU} GPUs | $(hostname) | $(date) ==="
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
 # Self-requeue before a partition time limit (submit with --requeue --signal=B:USR1@600): the job keeps its ID,
 # so jobs that depend on it (annotation) stay wired, and it resumes from the newest state dump.
+# With sbatch --wrap, use --wrap "exec bash run_cls_mix4_afhqdog.sh" -- B:USR1 goes only to the batch shell, so a
+# plain "bash ..." leaves sh (no trap) as that shell and the job just dies at the limit.
 trap 'echo "time limit near: requeueing $SLURM_JOB_ID"; kill $TRAIN_PID 2>/dev/null; scontrol requeue $SLURM_JOB_ID; exit 0' USR1
 python -m torch.distributed.run --standalone --nproc_per_node="$NGPU" train.py \
     --outdir="$OUT" --nosubdir --data="$DATA" --expr_id="$CLS_ID" \
