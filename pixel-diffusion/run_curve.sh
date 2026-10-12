@@ -3,11 +3,13 @@
 # each a valid run of that length, used to find where training stops improving.
 # Usage (inside a 2- or 4-GPU Slurm allocation): bash run_curve.sh <name>
 #   env CURVE_DATA     dataset folder under annotated_datasets (required)
-#       CURVE_SCHED    off (blurred groups never used = clean-only) | annot (Ambient-o per-image thresholds) | none.
-#                      A name, not JSON: sbatch --export splits values at commas.
+#       CURVE_SCHED    off (blurred groups never used = clean-only) | annot (Ambient-o per-image thresholds) | none
+#                      | file:<path> (a t_schedule JSON file, e.g. a searched per-group schedule).
+#                      A name or path, not JSON: sbatch --export splits values at commas.
 #       CURVE_DROPOUT  0.05 for CelebA (EDM FFHQ-64), 0.25 for AFHQ (EDM AFHQv2-64)   (required)
 #       CURVE_MIMG     total length in Mimg (default 20.48 = 40 snapshots of 512 kimg). Raising it later
 #                      and resubmitting continues exactly where the run stopped.
+#       CURVE_LR_RAMP  LR warm-up in kimg (default 100; a scaled-down copy of a run scales it by the same factor)
 #       CURVE_EXTRA    extra train.py flags (Ambient-o arm: --cls_ema_window=1, as every *_ambo run)
 #
 # Settings are EDM's 64x64 recipe (FFHQ/AFHQv2-64, Karras et al. 2022, Table 7 + README), every one passed
@@ -52,7 +54,8 @@ case "$NGPU" in 2|4) ;; *) echo "ERROR: curve runs need 2 or 4 GPUs (batch 256),
 case "${CURVE_SCHED:-none}" in
     none)  SCHED="" ;;
     off|annot) P=${CURVE_SCHED}; SCHED='{"type":"per_group","groups":{"g03":{"phases":[[0,"'$P'"]]},"g05":{"phases":[[0,"'$P'"]]},"g10":{"phases":[[0,"'$P'"]]},"g20":{"phases":[[0,"'$P'"]]}}}' ;;
-    *) echo "ERROR: CURVE_SCHED must be off, annot or none"; exit 1 ;;
+    file:*) F=${CURVE_SCHED#file:}; [ -f "$F" ] || { echo "ERROR: no schedule file $F"; exit 1; }; SCHED=$(cat "$F") ;;
+    *) echo "ERROR: CURVE_SCHED must be off, annot, none or file:<path>"; exit 1 ;;
 esac
 if [ -z "$SCHED" ]; then SCHED_ARG=(); else SCHED_ARG=(--t_schedule="$SCHED"); fi
 source ./gpu_preflight.sh && gpu_preflight
@@ -63,7 +66,7 @@ STATE=$(ls -1 "$RUNDIR"/training-state-*.pt 2>/dev/null | sort -V | tail -1)
 [ -n "$STATE" ] && RESUME="--resume=$STATE"
 echo "=== curve $NAME | $(hostname) | $(date) ==="
 echo "    data $DATA ($(wc -l < "$DATA/annotations.jsonl") annotations) | dropout $CURVE_DROPOUT | to ${MIMG} Mimg"
-echo "    schedule: ${SCHED:-none} | extra: ${CURVE_EXTRA:-} | ${RESUME:-fresh start}"
+echo "    schedule: ${SCHED:-none} | LR warm-up ${CURVE_LR_RAMP:-100} kimg | extra: ${CURVE_EXTRA:-} | ${RESUME:-fresh start}"
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
 
 # Self-requeue before a partition time limit (submit with --requeue --signal=B:USR1@600); resumes from the newest dump.
@@ -73,7 +76,7 @@ trap 'echo "time limit near: requeueing $SLURM_JOB_ID"; kill $TRAIN_PID 2>/dev/n
 python -m torch.distributed.run --standalone --nproc_per_node="$NGPU" train.py \
     --outdir="$RUNDIR" --nosubdir --data="$DATA" --expr_id="curve_${NAME}" \
     --cond=0 --arch=ddpmpp --precond=edm --cres=1,2,2,2 \
-    --batch=256 --lr=2e-4 --lr_rampup_kimg=100 --ema=0.5 \
+    --batch=256 --lr=2e-4 --lr_rampup_kimg="${CURVE_LR_RAMP:-100}" --ema=0.5 \
     --dropout="$CURVE_DROPOUT" --augment=0.15 --clip=1.0 --fp16=0 \
     --tick=64 --snap=8 --dump=8 \
     --corruption_probability=0.0 --noise_config=identity --s_max=4 \

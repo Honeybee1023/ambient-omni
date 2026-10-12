@@ -9,7 +9,9 @@
 # When it has scored everything available and the training run is not finished, it resubmits itself to
 # start again in 2 hours (CURVE_EVAL_RESUBMIT=0 turns that off).
 # Usage: bash run_curve_eval.sh <name>   env CURVE_REF (clean train folder, required), CURVE_REF2 (optional),
-#        CURVE_FINAL_KIMG (default 20480)
+#        CURVE_FINAL_KIMG (default 20480), CURVE_EVAL_KIMGS (space-separated: score only these snapshots),
+#        CURVE_EVAL_NOWAIT=1 (training has exited: skip the 2-minute snapshot-age check),
+#        CURVE_MIND_REF2=1 (also MIND against CURVE_REF2 -> "mind_ref2"; the pareto runs' held-out clean images)
 set -u
 export AMBIENT_BASE=${AMBIENT_BASE:?set AMBIENT_BASE}
 NAME=${1:?usage: run_curve_eval.sh <name>}
@@ -44,10 +46,11 @@ R2=""; [ -n "${CURVE_REF2:-}" ] && { R2=$(refstats "$CURVE_REF2") || exit 1; }
 for pkl in $(ls -1 "$RUNDIR"/network-snapshot-*.pkl 2>/dev/null | sort -V); do
     k=$(basename "$pkl" .pkl | sed 's/network-snapshot-0*//'); k=${k:-0}
     [ "$k" -eq 0 ] && continue
+    if [ -n "${CURVE_EVAL_KIMGS:-}" ] && ! [[ " ${CURVE_EVAL_KIMGS} " == *" $k "* ]]; then continue; fi
     RES="$OUT/k$(printf '%06d' "$k").json"
     [ -f "$RES" ] && continue
     # a snapshot is complete once a newer one exists or the training job has finished writing it (age > 2 min)
-    [ $(( $(date +%s) - $(stat -c %Y "$pkl") )) -lt 120 ] && continue
+    [ "${CURVE_EVAL_NOWAIT:-0}" != 1 ] && [ $(( $(date +%s) - $(stat -c %Y "$pkl") )) -lt 120 ] && continue
     echo "--- $NAME @ ${k} kimg | $(date +%T) ---"
     rm -rf "$TMP"; mkdir -p "$TMP/gen"
     python -m torch.distributed.run --standalone --nproc_per_node=1 generate.py \
@@ -56,6 +59,10 @@ for pkl in $(ls -1 "$RUNDIR"/network-snapshot-*.pkl 2>/dev/null | sort -V); do
     [ -n "$R2" ] && python eval_fid.py --gen_path="$TMP/gen" --ref_stats="$R2" --batch_size=250 --out_path="$TMP/fid2.json" >/dev/null
     python eval_mind.py --gen_path="$TMP/gen" --ref_path="$CURVE_REF" --ref_cache="$(mindcache "$CURVE_REF")" \
         --out_path="$TMP/mind.json" >/dev/null || { echo "ERROR: mind $k"; continue; }
+    if [ "${CURVE_MIND_REF2:-0}" = 1 ] && [ -n "${CURVE_REF2:-}" ]; then
+        python eval_mind.py --gen_path="$TMP/gen" --ref_path="$CURVE_REF2" --ref_cache="$(mindcache "$CURVE_REF2")" \
+            --out_path="$TMP/mind2.json" >/dev/null || { echo "ERROR: mind ref2 $k"; continue; }
+    fi
     python analysis/eval_memo_l2.py --gen_path="$TMP/gen" --train_path="$CURVE_REF" --out_path="$TMP/memo.json" >/dev/null \
         || { echo "ERROR: memo $k"; continue; }
     mkdir -p "$KEEP/k$(printf '%06d' "$k")"
@@ -68,6 +75,8 @@ r["fid_train"] = json.load(open(f"{tmp}/fid1.json"))["fid_score"]
 if os.path.exists(f"{tmp}/fid2.json"):
     r["fid_ref2"] = json.load(open(f"{tmp}/fid2.json"))["fid_score"]
 r["mind"] = json.load(open(f"{tmp}/mind.json"))["mind"]
+if os.path.exists(f"{tmp}/mind2.json"):
+    r["mind_ref2"] = json.load(open(f"{tmp}/mind2.json"))["mind"]
 r["memo"] = json.load(open(f"{tmp}/memo.json"))
 json.dump(r, open(res, "w"), indent=1)
 print(json.dumps({x: r[x] for x in r if x != "memo"}), "memo", r["memo"]["memorized_frac"])
