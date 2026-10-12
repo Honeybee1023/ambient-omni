@@ -140,7 +140,8 @@ def submit_short(st, L, i):
     py = f'{AMBIENT_BASE}/miniconda3/envs/ambient/bin/python'
     wrap = (e + f'bash {REPO}/run_curve.sh {name} && CUDA_VISIBLE_DEVICES=${{CUDA_VISIBLE_DEVICES%%,*}} '
             f'bash {REPO}/run_curve_eval.sh {name}; cd {REPO} && {py} pareto_afhq.py topup')
-    return sbatch(G2 + ['-t', '06:00:00', '-J', name, '-o', f'{LOG}/{name}-%j.out', '--wrap', wrap])
+    # nice: short runs yield to the long training curves and T runs when GPUs free up (they all share one QOS cap)
+    return sbatch(G2 + ['-t', '06:00:00', '--nice=1000', '-J', name, '-o', f'{LOG}/{name}-%j.out', '--wrap', wrap])
 
 
 def submit_full(st, i):
