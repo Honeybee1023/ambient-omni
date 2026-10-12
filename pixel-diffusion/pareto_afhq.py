@@ -113,7 +113,13 @@ def init():
 
 
 def sbatch(args):
+    """sbatch; if ou_sloan_gpu's per-user submit limit (QOS, 24 queued) is hit, retry without that partition."""
     r = subprocess.run(['sbatch', '--parsable'] + args, capture_output=True, text=True)
+    if r.returncode != 0 and 'QOSMaxSubmitJobPerUserLimit' in r.stderr:
+        a = list(args)
+        i = a.index('-p')
+        a[i + 1] = ','.join(p for p in a[i + 1].split(',') if p != 'ou_sloan_gpu')
+        r = subprocess.run(['sbatch', '--parsable'] + a, capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else 'ERR ' + r.stderr.strip()
 
 
@@ -197,6 +203,12 @@ def topup():
         for p in st['picks'].values():                  # scale each distinct pick to T
             i = p['pick']
             q = st['full'].get(str(i))
+            if q is not None and not str(q.get('job', 'ERR')).startswith('ERR') and str(q.get('eval_job', 'ERR')).startswith('ERR'):
+                q['eval_job'] = sbatch(G1 + [f'--dependency=afterok:{q["job"]}', '-J', f'ceval_{q["name"]}', '-o',
+                                             f'{LOG}/eval_{q["name"]}-%j.out', '--wrap',
+                                             env({'CURVE_FINAL_KIMG': str(T_KIMG), 'CURVE_EVAL_KIMGS': str(T_KIMG)})
+                                             + f'exec bash {REPO}/run_curve_eval.sh {q["name"]}'])
+                print('eval resubmitted', q['name'], q['eval_job'])
             if q is None or str(q.get('job', 'ERR')).startswith('ERR'):
                 t, ev = submit_full(st, i)
                 st['full'][str(i)] = {'name': full_name(i), 'job': t, 'eval_job': ev, 'submitted': time.strftime('%F %T')}
