@@ -41,6 +41,7 @@ def main():
     ap.add_argument("--name", required=True)
     ap.add_argument("--k", type=int, default=4)
     ap.add_argument("--eps", type=float, default=0.05)
+    ap.add_argument("--link", action="store_true", help="hard-link files instead of copying (same bytes, no new inodes)")
     args = ap.parse_args()
     D = f"{AMBIENT_BASE}/annotated_datasets"
     src, ambo, dst = f"{D}/{args.src}", f"{D}/{args.ambo}", f"{D}/{args.name}"
@@ -91,7 +92,7 @@ def main():
     for r in src_ann:
         f = r["filename"]
         nf = f if f.startswith("b0_") else f"k{m[f]}_{f}"
-        shutil.copy(f"{src}/{f}", f"{dst}/{nf}")
+        (os.link if args.link else shutil.copy)(f"{src}/{f}", f"{dst}/{nf}")
         out.append(dict(r, filename=nf))
     with open(f"{dst}/annotations.jsonl", "w") as fh:
         fh.write("".join(json.dumps(r) + "\n" for r in out))
