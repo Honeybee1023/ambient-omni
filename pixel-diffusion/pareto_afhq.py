@@ -282,9 +282,30 @@ def status():
         print(q['name'], q['job'], f"MIND {r['mind']:.4f} FID {r['fid_train']:.2f}" if r else '')
 
 
+FT_SWITCH = 0.75     # same switch point as the Ambient-o-then-clean baseline and CelebA's finetune75
+
+
+def submit_finetune():
+    """Fine-tune baseline at T: every blurred image used as clean (T 0) until FT_SWITCH, then clean images only.
+    Scored every 1024 kimg (10k samples) so its best snapshot <= T can be reported, like the other baselines."""
+    name = 'par_afhq_T_finetune75'
+    path = f'{SCHED_DIR}/finetune75.json'
+    if not os.path.exists(path):
+        json.dump({'type': 'per_group', 'groups': {g: {'phases': [[0, 0.0], [FT_SWITCH, 'off']]} for g in GROUPS if g != 'b0'}},
+                  open(path, 'w'))
+    e = env({'CURVE_DATA': SRC, 'CURVE_SCHED': f'file:{path}', 'CURVE_MIMG': f'{T_KIMG / 1000:g}', 'CURVE_LR_RAMP': '100'})
+    t = sbatch(G2 + ['-t', '06:00:00', '-J', name, '-o', f'{LOG}/{name}-%j.out',
+                     '--wrap', e + f'exec bash {REPO}/run_curve.sh {name}'])
+    kimgs = ' '.join(str(k) for k in range(1024, T_KIMG + 1, 1024))
+    ev = sbatch(G1 + [f'--dependency=afterok:{t}', '-J', f'ceval_{name}', '-o', f'{LOG}/eval_{name}-%j.out', '--wrap',
+                      env({'CURVE_FINAL_KIMG': str(T_KIMG), 'CURVE_EVAL_KIMGS': kimgs})
+                      + f'exec bash {REPO}/run_curve_eval.sh {name}'])
+    print(name, 'train', t, 'eval', ev)
+
+
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['build', 'init', 'topup', 'status', 'build_diag', 'submit_diag'])
+    ap.add_argument('cmd', choices=['build', 'init', 'topup', 'status', 'build_diag', 'submit_diag', 'submit_finetune'])
     a = ap.parse_args()
     {'build': build, 'init': init, 'topup': topup, 'status': status, 'build_diag': build_diag,
-     'submit_diag': submit_diag}[a.cmd]()
+     'submit_diag': submit_diag, 'submit_finetune': submit_finetune}[a.cmd]()
