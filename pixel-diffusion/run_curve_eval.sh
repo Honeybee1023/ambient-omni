@@ -11,7 +11,8 @@
 # Usage: bash run_curve_eval.sh <name>   env CURVE_REF (clean train folder, required), CURVE_REF2 (optional),
 #        CURVE_FINAL_KIMG (default 20480), CURVE_EVAL_KIMGS (space-separated: score only these snapshots),
 #        CURVE_EVAL_NOWAIT=1 (training has exited: skip the 2-minute snapshot-age check),
-#        CURVE_MIND_REF2=1 (also MIND against CURVE_REF2 -> "mind_ref2"; the pareto runs' held-out clean images)
+#        CURVE_MIND_REF2=1 (also MIND against CURVE_REF2 -> "mind_ref2"; the pareto runs' held-out clean images),
+#        CURVE_EVAL_N (samples, default 10000; any other value writes k<kimg>_n<N/1000>k.json next to the 10k result)
 set -u
 export AMBIENT_BASE=${AMBIENT_BASE:?set AMBIENT_BASE}
 NAME=${1:?usage: run_curve_eval.sh <name>}
@@ -27,6 +28,8 @@ KEEP="${OUT}/samples"
 mkdir -p "$OUT" "$KEEP" "${AMBIENT_BASE}/generated/curve/refstats"
 TMP=${TMPDIR:-/tmp}/curve_${NAME}_$$
 FINAL=${CURVE_FINAL_KIMG:-20480}
+NGEN=${CURVE_EVAL_N:-10000}
+SUF=""; [ "$NGEN" != 10000 ] && SUF="_n$((NGEN / 1000))k"
 
 refstats() {   # FID reference statistics, computed once per reference folder
     local ref=$1 npz="${AMBIENT_BASE}/generated/curve/refstats/$(basename "$(dirname "$1")")_$(basename "$1").npz"
@@ -47,14 +50,14 @@ for pkl in $(ls -1 "$RUNDIR"/network-snapshot-*.pkl 2>/dev/null | sort -V); do
     k=$(basename "$pkl" .pkl | sed 's/network-snapshot-0*//'); k=${k:-0}
     [ "$k" -eq 0 ] && continue
     if [ -n "${CURVE_EVAL_KIMGS:-}" ] && ! [[ " ${CURVE_EVAL_KIMGS} " == *" $k "* ]]; then continue; fi
-    RES="$OUT/k$(printf '%06d' "$k").json"
+    RES="$OUT/k$(printf '%06d' "$k")${SUF}.json"
     [ -f "$RES" ] && continue
     # a snapshot is complete once a newer one exists or the training job has finished writing it (age > 2 min)
     [ "${CURVE_EVAL_NOWAIT:-0}" != 1 ] && [ $(( $(date +%s) - $(stat -c %Y "$pkl") )) -lt 120 ] && continue
     echo "--- $NAME @ ${k} kimg | $(date +%T) ---"
     rm -rf "$TMP"; mkdir -p "$TMP/gen"
     python -m torch.distributed.run --standalone --nproc_per_node=1 generate.py \
-        --network="$pkl" --outdir="$TMP/gen" --seeds=0-9999 --batch=250 --steps=40 >/dev/null || { echo "ERROR: generate $k"; continue; }
+        --network="$pkl" --outdir="$TMP/gen" --seeds=0-$((NGEN - 1)) --batch=250 --steps=40 >/dev/null || { echo "ERROR: generate $k"; continue; }
     python eval_fid.py --gen_path="$TMP/gen" --ref_stats="$R1" --batch_size=250 --out_path="$TMP/fid1.json" >/dev/null || { echo "ERROR: fid $k"; continue; }
     [ -n "$R2" ] && python eval_fid.py --gen_path="$TMP/gen" --ref_stats="$R2" --batch_size=250 --out_path="$TMP/fid2.json" >/dev/null
     python eval_mind.py --gen_path="$TMP/gen" --ref_path="$CURVE_REF" --ref_cache="$(mindcache "$CURVE_REF")" \
@@ -65,12 +68,12 @@ for pkl in $(ls -1 "$RUNDIR"/network-snapshot-*.pkl 2>/dev/null | sort -V); do
     fi
     python analysis/eval_memo_l2.py --gen_path="$TMP/gen" --train_path="$CURVE_REF" --out_path="$TMP/memo.json" >/dev/null \
         || { echo "ERROR: memo $k"; continue; }
-    mkdir -p "$KEEP/k$(printf '%06d' "$k")"
-    ls "$TMP/gen" | grep -E '\.png$' | sort | head -4 | while read f; do cp "$TMP/gen/$f" "$KEEP/k$(printf '%06d' "$k")/"; done
-    python - "$k" "$TMP" "$RES" <<'P'
+    [ -z "$SUF" ] && mkdir -p "$KEEP/k$(printf '%06d' "$k")"
+    [ -z "$SUF" ] && ls "$TMP/gen" | grep -E '\.png$' | sort | head -4 | while read f; do cp "$TMP/gen/$f" "$KEEP/k$(printf '%06d' "$k")/"; done
+    python - "$k" "$TMP" "$RES" "$NGEN" <<'P'
 import json, os, sys
 k, tmp, res = int(sys.argv[1]), sys.argv[2], sys.argv[3]
-r = {"kimg": k, "n_samples": 10000, "sampler": "heun 40 steps deterministic"}
+r = {"kimg": k, "n_samples": int(sys.argv[4]), "sampler": "heun 40 steps deterministic"}
 r["fid_train"] = json.load(open(f"{tmp}/fid1.json"))["fid_score"]
 if os.path.exists(f"{tmp}/fid2.json"):
     r["fid_ref2"] = json.load(open(f"{tmp}/fid2.json"))["fid_score"]
@@ -85,7 +88,7 @@ done
 rm -rf "$TMP"
 
 LAST=$(ls -1 "$RUNDIR"/network-snapshot-*.pkl 2>/dev/null | sort -V | tail -1 | sed 's/.*snapshot-0*\([0-9][0-9]*\)\.pkl/\1/')
-DONE_ALL=$(ls "$OUT"/k*.json 2>/dev/null | wc -l)
+DONE_ALL=$(ls "$OUT"/k*.json 2>/dev/null | grep -v '_n[0-9]*k\.json' | wc -l)
 N_SNAP=$(ls "$RUNDIR"/network-snapshot-*.pkl 2>/dev/null | grep -v 'snapshot-000000' | wc -l)
 echo "=== $NAME scored $DONE_ALL of $N_SNAP snapshots; training at ${LAST:-0} of $FINAL kimg | $(date) ==="
 if [ "${CURVE_EVAL_RESUBMIT:-1}" = 1 ] && { [ "${LAST:-0}" -lt "$FINAL" ] || [ "$DONE_ALL" -lt "$N_SNAP" ]; } && [ -n "${SLURM_JOB_ID:-}" ]; then
