@@ -22,7 +22,7 @@ Every short job calls topup when it ends, so the study drives itself.
 import os as _os
 AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or "/orcd/scratch/orcd/006/honjar"
 
-import argparse, fcntl, json, os, subprocess, sys, time
+import argparse, fcntl, json, os, shutil, subprocess, sys, time
 
 import numpy as np
 
@@ -95,6 +95,55 @@ def build():
         print(L, summary[L])
     json.dump({'source': SRC, 'sub_seed': SUB_SEED, 'T_kimg': T_KIMG, 'subsets': summary},
               open(f'{DATASETS}/afhq_par_subsets.meta.json', 'w'), indent=1)
+
+
+AMBO_SRC = 'afhqdog_mix4_ambo15'          # same images as SRC, named by blur level, with Ambient-o's per-image annotations
+DIAG = f'{AMBIENT_BASE}/generated/pareto/afhq_diag.json'
+def diag_subset(L): return f'afhq_par_L{L}_ambo'
+
+
+def build_diag():
+    """Each L subset re-expressed in Ambient-o's own dataset: the same images (k<n>_g<lvl>_x -> g<lvl>_x), with their
+    per-image classifier annotations, so CURVE_SCHED=annot runs Ambient-o and =off runs clean-only on exactly the
+    images the search's short runs saw."""
+    src = f'{DATASETS}/{AMBO_SRC}'
+    amb = {json.loads(l)['filename']: l for l in open(f'{src}/annotations.jsonl')}
+    for L in LS:
+        out = f'{DATASETS}/{diag_subset(L)}'
+        if os.path.exists(out):
+            sys.exit(f'{out} exists; refusing to overwrite')
+        names = [json.loads(l)['filename'] for l in open(f'{DATASETS}/{subset(L)}/annotations.jsonl')]
+        names = [n if n.startswith('b0_') else n.split('_', 1)[1] for n in names]
+        missing = [n for n in names if n not in amb]
+        assert not missing, f'{len(missing)} images not in {AMBO_SRC}, e.g. {missing[:3]}'
+        os.makedirs(out)
+        with open(f'{out}/annotations.jsonl', 'w') as fh:
+            for n in names:
+                os.link(f'{src}/{n}', f'{out}/{n}')
+                fh.write(amb[n] if amb[n].endswith('\n') else amb[n] + '\n')
+        shutil.copy(f'{src}/sigmas.txt', out)
+        print(L, len(names), 'images ->', out)
+
+
+def submit_diag():
+    """Ambient-o (annot) and clean-only (off) as short runs at every L, scored like the search's short runs."""
+    log = json.load(open(DIAG)) if os.path.exists(DIAG) else {}
+    py = f'{AMBIENT_BASE}/miniconda3/envs/ambient/bin/python'
+    for L in LS:
+        f = L / T_KIMG
+        for tag, sched, extra in (('ambo', 'annot', '--cls_ema_window=1'), ('clean', 'off', '')):
+            name = f'par_afhq_L{L}_{tag}'
+            if not str(log.get(name, {}).get('job', 'ERR')).startswith('ERR'):
+                continue
+            e = env({'CURVE_DATA': diag_subset(L), 'CURVE_SCHED': sched, 'CURVE_EXTRA': extra,
+                     'CURVE_MIMG': f'{L / 1000:g}', 'CURVE_LR_RAMP': f'{100 * f:g}', 'CURVE_REF2': heldout(L),
+                     'CURVE_MIND_REF2': '1', 'CURVE_FINAL_KIMG': str(L), 'CURVE_EVAL_KIMGS': str(L)})
+            wrap = (e + f'bash {REPO}/run_curve.sh {name} && CUDA_VISIBLE_DEVICES=${{CUDA_VISIBLE_DEVICES%%,*}} '
+                    f'bash {REPO}/run_curve_eval.sh {name}')
+            job = sbatch(G2 + ['-t', '06:00:00', '-J', name, '-o', f'{LOG}/{name}-%j.out', '--wrap', wrap])
+            log[name] = {'job': job, 'L': L, 'sched': sched, 'submitted': time.strftime('%F %T')}
+            print(name, job)
+    json.dump(log, open(DIAG, 'w'), indent=1)
 
 
 def init():
@@ -235,6 +284,7 @@ def status():
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['build', 'init', 'topup', 'status'])
+    ap.add_argument('cmd', choices=['build', 'init', 'topup', 'status', 'build_diag', 'submit_diag'])
     a = ap.parse_args()
-    {'build': build, 'init': init, 'topup': topup, 'status': status}[a.cmd]()
+    {'build': build, 'init': init, 'topup': topup, 'status': status, 'build_diag': build_diag,
+     'submit_diag': submit_diag}[a.cmd]()
