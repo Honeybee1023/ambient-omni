@@ -283,29 +283,58 @@ def status():
 
 
 FT_SWITCH = 0.75     # same switch point as the Ambient-o-then-clean baseline and CelebA's finetune75
+HOLDOUT = f'{AMBIENT_BASE}/afhqdog_processed/val_64'     # 500 clean dogs never trained on (held-out loss curve)
+
+
+def submit_baseline(name, data, sched):
+    """A baseline trained to T, scored at EVERY saved snapshot (512 kimg, 10k samples) so its best snapshot <= T can be
+    reported, then its held-out denoising loss by noise level at every snapshot (own output file, merged by the page)."""
+    e = env({'CURVE_DATA': data, 'CURVE_SCHED': sched, 'CURVE_MIMG': f'{T_KIMG / 1000:g}', 'CURVE_LR_RAMP': '100'})
+    t = sbatch(G2 + ['-t', '06:00:00', '-J', name, '-o', f'{LOG}/{name}-%j.out',
+                     '--wrap', e + f'exec bash {REPO}/run_curve.sh {name}'])
+    print(name, 'train', t)
+    followups(name, t)
+
+
+def submit_scoring(name, after):
+    # two jobs (alternate snapshots): one job scoring all 20 at 10k samples would not fit the 6-h limit
+    ks = list(range(512, T_KIMG + 1, 512))
+    return ','.join(sbatch(G1 + [f'--dependency=afterok:{after}', '-J', f'ceval_{name}', '-o', f'{LOG}/eval_{name}-%j.out',
+                                 '--wrap', env({'CURVE_FINAL_KIMG': str(T_KIMG), 'CURVE_EVAL_KIMGS': ' '.join(map(str, part))})
+                                 + f'exec bash {REPO}/run_curve_eval.sh {name}']) for part in (ks[1::2], ks[0::2]))
 
 
 def submit_finetune():
-    """Fine-tune baseline at T: every blurred image used as clean (T 0) until FT_SWITCH, then clean images only.
-    Scored every 1024 kimg (10k samples) so its best snapshot <= T can be reported, like the other baselines."""
-    name = 'par_afhq_T_finetune75'
+    """Fine-tune baseline at T: every blurred image used as clean (T 0) until FT_SWITCH, then clean images only."""
     path = f'{SCHED_DIR}/finetune75.json'
     if not os.path.exists(path):
         json.dump({'type': 'per_group', 'groups': {g: {'phases': [[0, 0.0], [FT_SWITCH, 'off']]} for g in GROUPS if g != 'b0'}},
                   open(path, 'w'))
-    e = env({'CURVE_DATA': SRC, 'CURVE_SCHED': f'file:{path}', 'CURVE_MIMG': f'{T_KIMG / 1000:g}', 'CURVE_LR_RAMP': '100'})
-    t = sbatch(G2 + ['-t', '06:00:00', '-J', name, '-o', f'{LOG}/{name}-%j.out',
-                     '--wrap', e + f'exec bash {REPO}/run_curve.sh {name}'])
-    kimgs = ' '.join(str(k) for k in range(1024, T_KIMG + 1, 1024))
-    ev = sbatch(G1 + [f'--dependency=afterok:{t}', '-J', f'ceval_{name}', '-o', f'{LOG}/eval_{name}-%j.out', '--wrap',
-                      env({'CURVE_FINAL_KIMG': str(T_KIMG), 'CURVE_EVAL_KIMGS': kimgs})
-                      + f'exec bash {REPO}/run_curve_eval.sh {name}'])
-    print(name, 'train', t, 'eval', ev)
+    submit_baseline('par_afhq_T_finetune75', SRC, f'file:{path}')
+
+
+def followups(name, after):
+    """Scoring every 512 kimg + held-out loss curve for a baseline whose training job is already queued."""
+    py = f'{AMBIENT_BASE}/miniconda3/envs/ambient/bin/python'
+    ck = ' '.join(f'--ckpt {name}:{AMBIENT_BASE}/train_outputs/curve/{name}/network-snapshot-{k:06d}.pkl'
+                  for k in range(512, T_KIMG + 1, 512))
+    lc = sbatch(G1 + [f'--dependency=afterok:{after}', '-J', f'losscurve_{name}', '-o', f'{LOG}/losscurve_{name}-%j.out',
+                      '--wrap', f'export AMBIENT_BASE={AMBIENT_BASE}; cd {REPO} && exec {py} analysis/eval_holdout_loss_curve.py '
+                      f'--holdout_dir {HOLDOUT} --out {AMBIENT_BASE}/generated/pareto/afhq_losscurve_{name}.json {ck}'])
+    print(name, 'eval', submit_scoring(name, after), 'losscurve', lc)
+
+
+def submit_oracle():
+    """Idealised upper-bound baseline: all 4,739 training dogs clean (no blur at all), no schedule."""
+    submit_baseline('par_afhq_T_oracle', 'afhqdog_oracle', 'none')
 
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['build', 'init', 'topup', 'status', 'build_diag', 'submit_diag', 'submit_finetune'])
+    ap.add_argument('--name'); ap.add_argument('--after')
+    ap.add_argument('cmd', choices=['followups', 'build', 'init', 'topup', 'status', 'build_diag', 'submit_diag', 'submit_finetune', 'submit_oracle'])
     a = ap.parse_args()
+    if a.cmd == 'followups':
+        followups(a.name, a.after); raise SystemExit
     {'build': build, 'init': init, 'topup': topup, 'status': status, 'build_diag': build_diag,
-     'submit_diag': submit_diag, 'submit_finetune': submit_finetune}[a.cmd]()
+     'submit_diag': submit_diag, 'submit_finetune': submit_finetune, 'submit_oracle': submit_oracle}[a.cmd]()
