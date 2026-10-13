@@ -324,6 +324,21 @@ def followups(name, after):
     print(name, 'eval', submit_scoring(name, after), 'losscurve', lc)
 
 
+def submit_s02_lastjump():
+    """Two one-change tests of s02's LAST jump (k1, the mildest group: T 0 -> 0.90 at 92.3%) at T:
+    A (when): the jump kept the same distance from the end as in the L=1024 short run (s02's pick length),
+              i.e. 1 - (1 - 0.923) * 1024 / T;   B (where): same time, level 0.90 -> 0.80."""
+    base = json.load(open(f'{SCHED_DIR}/s02.json'))
+    w, lv = base['groups']['k1']['phases'][1]
+    for tag, nw, nlv in (('lastfe', round(1 - (1 - w) * 1024 / T_KIMG, 5), lv), ('last080', w, 0.8)):
+        path = f'{SCHED_DIR}/s02_{tag}.json'
+        if not os.path.exists(path):
+            s = json.loads(json.dumps(base))
+            s['groups']['k1']['phases'][1] = [nw, nlv]
+            json.dump(s, open(path, 'w'))
+        submit_baseline(f'par_afhq_T_s02_{tag}', SRC, f'file:{path}')
+
+
 def submit_oracle():
     """Idealised upper-bound baseline: all 4,739 training dogs clean (no blur at all), no schedule."""
     submit_baseline('par_afhq_T_oracle', 'afhqdog_oracle', 'none')
@@ -332,9 +347,9 @@ def submit_oracle():
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--name'); ap.add_argument('--after')
-    ap.add_argument('cmd', choices=['followups', 'build', 'init', 'topup', 'status', 'build_diag', 'submit_diag', 'submit_finetune', 'submit_oracle'])
+    ap.add_argument('cmd', choices=['followups', 'build', 'init', 'topup', 'status', 'build_diag', 'submit_diag', 'submit_finetune', 'submit_oracle', 'submit_s02_lastjump'])
     a = ap.parse_args()
     if a.cmd == 'followups':
         followups(a.name, a.after); raise SystemExit
     {'build': build, 'init': init, 'topup': topup, 'status': status, 'build_diag': build_diag,
-     'submit_diag': submit_diag, 'submit_finetune': submit_finetune, 'submit_oracle': submit_oracle}[a.cmd]()
+     'submit_diag': submit_diag, 'submit_finetune': submit_finetune, 'submit_oracle': submit_oracle, 'submit_s02_lastjump': submit_s02_lastjump}[a.cmd]()
