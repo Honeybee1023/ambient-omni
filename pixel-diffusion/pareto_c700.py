@@ -8,7 +8,8 @@ T = 15360 kimg (Ambient-o's CelebA-1% curve stops improving there; chosen by the
 Schedules: ONE scrambled Sobol sequence (SOBOL_SEED, new: not the AFHQ one) over short_search's space, the same 20
 schedules at every L, so N = 8, 12, 16, 20 are prefixes. Pick = top-1 of the first N by MIND against the clean faces
 that L's subset does not contain (held-out); FID is recorded for every run too. Each distinct pick is trained to T on
-the full k-means data and scored at every 512-kimg snapshot (FID/MIND vs the 70k clean train faces and vs the test
+the full k-means data with its last jump kept the same distance from the end as in the short run it was picked at
+(fixed-from-end; proportional copies only by hand, submit_prop) and scored at every 512-kimg snapshot (FID/MIND vs the 70k clean train faces and vs the test
 split). Ambient-o and clean-only also run as short runs on each subset's exact images (diagnostics, as on AFHQ).
 
 Usage (Engaging; CPU via srun/sbatch, never the login node):
@@ -213,11 +214,28 @@ def submit_scoring(name, after):
                                  + f'exec bash {REPO}/run_curve_eval.sh {name}']) for j in range(4))
 
 
-def submit_full(st, i):
-    name = full_name(i)
-    e = env({'CURVE_DATA': SRC, 'CURVE_SCHED': f'file:{SCHED_DIR}/s{i:02d}.json', 'CURVE_MIMG': f'{T_KIMG / 1000:g}',
+def fe_sched(i, L):
+    """Schedule i scaled to T with its LAST jump kept the same distance from the end as in the L-kimg short run
+    (AFHQ test A, 2026-10-14: s02 scaled this way beat Ambient-o at T, proportional scaling did not). The other
+    jumps keep their fraction of training. Returns the schedule file."""
+    path = f'{SCHED_DIR}/s{i:02d}_feL{L}.json'
+    if not os.path.exists(path):
+        s = json.load(open(f'{SCHED_DIR}/s{i:02d}.json'))
+        g = max((g for g, v in s['groups'].items() if v['phases'][1][0] < 1), key=lambda g: s['groups'][g]['phases'][1][0])
+        w, lv = s['groups'][g]['phases'][1]
+        s['groups'][g]['phases'][1] = [round(1 - (1 - w) * L / T_KIMG, 5), lv]
+        json.dump(s, open(path, 'w'))
+    return path
+
+
+def submit_full(st, i, L=None, nice=0):
+    """Pick i trained to T: last jump fixed-from-end of its pick length L (the default rule), or proportional (L None,
+    low priority: only for GPUs nothing else would use)."""
+    name = full_name(i) + (f'_feL{L}' if L else '')
+    sched = fe_sched(i, L) if L else f'{SCHED_DIR}/s{i:02d}.json'
+    e = env({'CURVE_DATA': SRC, 'CURVE_SCHED': f'file:{sched}', 'CURVE_MIMG': f'{T_KIMG / 1000:g}',
              'CURVE_LR_RAMP': '100'})
-    t = sbatch(G2 + ['-t', '06:00:00', '-J', name, '-o', f'{LOG}/{name}-%j.out',
+    t = sbatch(G2 + ['-t', '06:00:00'] + ([f'--nice={nice}'] if nice else []) + ['-J', name, '-o', f'{LOG}/{name}-%j.out',
                      '--wrap', e + f'exec bash {REPO}/run_curve.sh {name}'])
     ck = ' '.join(f'--ckpt {name}:{AMBIENT_BASE}/train_outputs/curve/{name}/network-snapshot-{k:06d}.pkl'
                   for k in range(1024, T_KIMG + 1, 1024))
@@ -273,13 +291,30 @@ def topup():
                                     'pick_fid': int(np.argmin([r['fid_ref2'] for r in rs])),
                                     'decided': time.strftime('%F %T')}
                 print('pick', key, st['picks'][key])
-        for p in st['picks'].values():                  # scale each distinct pick to T
-            i = p['pick']
-            q = st['full'].get(str(i))
+        for key, p in st['picks'].items():             # each distinct (pick, L) to T, last jump fixed-from-end
+            i, L = p['pick'], int(key.split('_')[0][1:])
+            k = f'{i}_feL{L}'
+            q = st['full'].get(k)
             if q is None or str(q.get('job', 'ERR')).startswith('ERR'):
-                t, ev = submit_full(st, i)
-                st['full'][str(i)] = {'name': full_name(i), 'job': t, 'eval_job': ev, 'submitted': time.strftime('%F %T')}
-                print('scaled to T', full_name(i), t, ev)
+                t, ev = submit_full(st, i, L)
+                st['full'][k] = {'name': f'{full_name(i)}_feL{L}', 'job': t, 'eval_job': ev,
+                                 'submitted': time.strftime('%F %T')}
+                print('scaled to T (last jump fixed-from-end)', k, t, ev)
+        save(st)
+
+
+def submit_prop():
+    """Low-priority proportional versions of the picks (user, 2026-10-14): submit by hand only onto GPUs nothing of
+    ours or anyone else's would use."""
+    with open(STATE + '.lock', 'w') as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        st = load()
+        for i in sorted({p['pick'] for p in st['picks'].values()}):
+            if str(i) in st['full']:
+                continue
+            t, ev = submit_full(st, i, None, nice=10000)
+            st['full'][str(i)] = {'name': full_name(i), 'job': t, 'eval_job': ev, 'submitted': time.strftime('%F %T')}
+            print('proportional to T', full_name(i), t, ev)
         save(st)
 
 
@@ -300,7 +335,7 @@ def status():
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['build', 'build_diag', 'init', 'submit_diag', 'topup', 'status'])
+    ap.add_argument('cmd', choices=['build', 'build_diag', 'init', 'submit_diag', 'topup', 'status', 'submit_prop'])
     a = ap.parse_args()
     {'build': build, 'build_diag': build_diag, 'init': init, 'submit_diag': submit_diag, 'topup': topup,
-     'status': status}[a.cmd]()
+     'status': status, 'submit_prop': submit_prop}[a.cmd]()
