@@ -339,6 +339,19 @@ def submit_s02_lastjump():
         submit_baseline(f'par_afhq_T_s02_{tag}', SRC, f'file:{path}')
 
 
+def submit_lastfe(i, L):
+    """Pick i at T with the rule that won for s02 (test A): only the latest jump moves, to the same distance from the
+    end as in the L-kimg short run it was picked at; the other jumps stay proportional. s06 (picked at L=512) is the
+    check that the rule is not specific to s02 (user, 2026-10-15)."""
+    s = json.load(open(f'{SCHED_DIR}/s{i:02d}.json'))
+    g = max((g for g in s['groups'] if s['groups'][g]['phases'][1][0] < 1), key=lambda g: s['groups'][g]['phases'][1][0])
+    w, lv = s['groups'][g]['phases'][1]
+    s['groups'][g]['phases'][1] = [round(1 - (1 - w) * L / T_KIMG, 5), lv]
+    path = f'{SCHED_DIR}/s{i:02d}_lastfe.json'
+    json.dump(s, open(path, 'w'))
+    submit_baseline(f'par_afhq_T_s{i:02d}_lastfe', SRC, f'file:{path}')
+
+
 def submit_oracle():
     """Idealised upper-bound baseline: all 4,739 training dogs clean (no blur at all), no schedule."""
     submit_baseline('par_afhq_T_oracle', 'afhqdog_oracle', 'none')
@@ -347,9 +360,10 @@ def submit_oracle():
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--name'); ap.add_argument('--after')
-    ap.add_argument('cmd', choices=['followups', 'build', 'init', 'topup', 'status', 'build_diag', 'submit_diag', 'submit_finetune', 'submit_oracle', 'submit_s02_lastjump'])
+    ap.add_argument('cmd', choices=['followups', 'build', 'init', 'topup', 'status', 'build_diag', 'submit_diag', 'submit_finetune', 'submit_oracle', 'submit_s02_lastjump', 'submit_s06_lastfe'])
     a = ap.parse_args()
     if a.cmd == 'followups':
         followups(a.name, a.after); raise SystemExit
     {'build': build, 'init': init, 'topup': topup, 'status': status, 'build_diag': build_diag,
-     'submit_diag': submit_diag, 'submit_finetune': submit_finetune, 'submit_oracle': submit_oracle, 'submit_s02_lastjump': submit_s02_lastjump}[a.cmd]()
+     'submit_diag': submit_diag, 'submit_finetune': submit_finetune, 'submit_oracle': submit_oracle, 'submit_s02_lastjump': submit_s02_lastjump,
+     'submit_s06_lastfe': lambda: submit_lastfe(6, 512)}[a.cmd]()
