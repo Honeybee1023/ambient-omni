@@ -170,7 +170,14 @@ def short_job(name, L, e, after_eval=''):
     --wrap chain would leave sh as the batch shell and the run would just die at the limit)."""
     os.makedirs(f'{LOG}/scripts', exist_ok=True)
     path = f'{LOG}/scripts/{name}.sh'
+    evpath = f'{LOG}/scripts/eval_{name}.sh'
     snap = f'{AMBIENT_BASE}/train_outputs/curve/{name}/network-snapshot-{L:06d}.pkl'
+    # scoring alone, for when training ends too late in the 6-h job to score there (slow GPU: L2048_s06 on an A100
+    # finished training at 4.5 h and timed out while scoring, 2026-10-15)
+    with open(evpath, 'w') as fh:
+        fh.write('#!/bin/bash\n' + e + '\n' + f'bash {REPO}/run_curve_eval.sh {name}\n' + after_eval + '\n')
+    hand_off = ' '.join(['sbatch'] + G1 + ['-J', f'eval_{name}', '-o', f'{LOG}/eval_{name}-%j.out', '--wrap',
+                                           f'"exec bash {evpath}"'])
     with open(path, 'w') as fh:
         fh.write('#!/bin/bash\n' + e + '\n'
                  f'bash {REPO}/run_curve.sh {name} & P=$!\n'
@@ -178,6 +185,7 @@ def short_job(name, L, e, after_eval=''):
                  'wait $P; rc=$?; while kill -0 $P 2>/dev/null; do wait $P; rc=$?; done\n'
                  '[ $rc -eq 0 ] || exit $rc          # training failed: fail the job so the watcher sees it\n'
                  f'[ -f {snap} ] || exit 0          # requeued (or failed): nothing to score yet\n'
+                 f'[ $SECONDS -gt 14400 ] && {{ {hand_off}; exit 0; }}   # under 2 h left: score in its own job\n'
                  f'CUDA_VISIBLE_DEVICES=${{CUDA_VISIBLE_DEVICES%%,*}} bash {REPO}/run_curve_eval.sh {name}\n'
                  + after_eval + '\n')
     return sbatch(G2 + ['-t', '06:00:00', f'--nice={NICE_SHORT}', '-J', name, '-o', f'{LOG}/{name}-%j.out',
