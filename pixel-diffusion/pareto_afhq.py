@@ -163,6 +163,9 @@ def init():
 
 def sbatch(args):
     """sbatch; if ou_sloan_gpu's per-user submit limit (QOS, 24 queued) is hit, retry without that partition."""
+    if any(x.startswith('--dependency') for x in args):     # a job only waiting must not hold one of the 24 slots;
+        args = list(args); i = args.index('-p')                 # sloan_slots() adds ou_sloan_gpu back once it is ready
+        args[i + 1] = ','.join(p for p in args[i + 1].split(',') if p != 'ou_sloan_gpu')
     r = subprocess.run(['sbatch', '--parsable'] + args, capture_output=True, text=True)
     if r.returncode != 0 and 'QOSMaxSubmitJobPerUserLimit' in r.stderr:
         a = list(args)

@@ -147,6 +147,9 @@ def init():
 
 def sbatch(args):
     """sbatch; if ou_sloan_gpu's per-user submit limit (QOS, 24 queued) is hit, retry without that partition."""
+    if any(x.startswith('--dependency') for x in args):     # a job only waiting must not hold one of the 24 slots;
+        args = list(args); i = args.index('-p')                 # sloan_slots() adds ou_sloan_gpu back once it is ready
+        args[i + 1] = ','.join(p for p in args[i + 1].split(',') if p != 'ou_sloan_gpu')
     r = subprocess.run(['sbatch', '--parsable'] + args, capture_output=True, text=True)
     if r.returncode != 0 and 'QOSMaxSubmitJobPerUserLimit' in r.stderr:
         a = list(args)
@@ -268,6 +271,21 @@ def pending_jobs():
     return sum(1 for j in r.stdout.split() if j.startswith('par_c700_'))
 
 
+def sloan_slots(limit=24):
+    """ou_sloan_gpu allows 24 queued+running jobs per user. Give its free slots to our pending jobs that are ready to
+    run (not waiting on a dependency) and lack it, highest Slurm priority first (runs to T before short runs)."""
+    q = subprocess.run(['squeue', '-u', os.environ.get('USER', 'honjar'), '-h', '-o', '%i|%P|%T|%r|%Q|%b|%j'],
+                       capture_output=True, text=True).stdout.split('\n')
+    rows = [l.split('|') for l in q if l.count('|') == 6]
+    used = sum('ou_sloan_gpu' in r[1].split(',') for r in rows)
+    want = [r for r in rows if r[2] == 'PENDING' and r[3] != 'Dependency' and 'ou_sloan_gpu' not in r[1].split(',')
+            and r[1] != 'ou_sloan_gpu' and 'gpu' in r[5] and not any(t in r[5] for t in ('a100', 'l40s', 'a40', 'rtx'))]
+    for r in sorted(want, key=lambda r: -int(r[4]))[:max(0, limit - used)]:
+        res = subprocess.run(['scontrol', 'update', f'JobId={r[0]}', f'Partition=ou_sloan_gpu,{r[1]}'],
+                             capture_output=True, text=True)
+        print('ou_sloan_gpu slot ->', r[6], r[0], res.stderr.strip())
+
+
 def topup():
     os.makedirs(LOG, exist_ok=True)
     with open(STATE + '.lock', 'w') as lk:
@@ -324,6 +342,7 @@ def topup():
                              'submitted': time.strftime('%F %T')}
             print('FID pick to T (last jump fixed-from-end, low priority)', k, t, ev)
         save(st)
+    sloan_slots()
 
 
 def submit_prop():
@@ -357,7 +376,7 @@ def status():
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['build', 'build_diag', 'init', 'submit_diag', 'topup', 'status', 'submit_prop'])
+    ap.add_argument('cmd', choices=['build', 'build_diag', 'init', 'submit_diag', 'topup', 'status', 'submit_prop', 'slots'])
     a = ap.parse_args()
-    {'build': build, 'build_diag': build_diag, 'init': init, 'submit_diag': submit_diag, 'topup': topup,
+    {'build': build, 'build_diag': build_diag, 'init': init, 'submit_diag': submit_diag, 'topup': topup, 'slots': sloan_slots,
      'status': status, 'submit_prop': submit_prop}[a.cmd]()
