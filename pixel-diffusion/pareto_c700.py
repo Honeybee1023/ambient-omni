@@ -312,6 +312,17 @@ def topup():
                 st['full'][k] = {'name': f'{full_name(i)}_feL{L}', 'job': t, 'eval_job': ev,
                                  'submitted': time.strftime('%F %T')}
                 print('scaled to T (last jump fixed-from-end)', k, t, ev)
+        # where held-out FID picks a different schedule: also to T, but lowest priority among our jobs (user,
+        # 2026-10-15: "nice to have, not necessary", for idle GPUs)
+        for key, p in st['picks'].items():
+            i, L = p['pick_fid'], int(key.split('_')[0][1:])
+            k = f'{i}_feL{L}'
+            if i == p['pick'] or k in st['full'] and not str(st['full'][k].get('job', 'ERR')).startswith('ERR'):
+                continue
+            t, ev = submit_full(st, i, L, nice=NICE_PROP)
+            st['full'][k] = {'name': f'{full_name(i)}_feL{L}', 'job': t, 'eval_job': ev, 'fid_pick': key,
+                             'submitted': time.strftime('%F %T')}
+            print('FID pick to T (last jump fixed-from-end, low priority)', k, t, ev)
         save(st)
 
 
