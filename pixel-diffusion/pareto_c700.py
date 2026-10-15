@@ -47,6 +47,10 @@ LOG = f'{AMBIENT_BASE}/train_logs/pareto'
 REPO = f'{AMBIENT_BASE}/ambient-omni/pixel-diffusion'
 PY = f'{AMBIENT_BASE}/miniconda3/envs/ambient/bin/python'
 X = '--exclude=node[4004,4007-4008,5003-5005,5101,5103-5104,5106,5202-5204]'
+# Order among our own jobs only (user, 2026-10-14: "low priority" means relative to our other jobs; always try to get
+# our jobs onto free GPUs). Offsets are tiny next to the ~250k priorities, so they barely move us against other users.
+# Full runs to T: nice 0; short runs: NICE_SHORT; proportional copies: NICE_PROP. (scontrol top is disabled here.)
+NICE_SHORT, NICE_PROP = 10, 20
 G2 = (f'{X} -p ou_sloan_gpu,sched_mit_sloan_gpu_r8,mit_normal_gpu,mit_preemptable --gres=gpu:2 -c 16 --mem=128G '
       f'--requeue --signal=B:USR1@600').split()
 G1 = f'{X} -p sched_mit_sloan_gpu_r8,ou_sloan_gpu,mit_normal_gpu --gres=gpu:1 -c 8 --mem=96G -t 06:00:00'.split()
@@ -176,7 +180,7 @@ def short_job(name, L, e, after_eval=''):
                  f'[ -f {snap} ] || exit 0          # requeued (or failed): nothing to score yet\n'
                  f'CUDA_VISIBLE_DEVICES=${{CUDA_VISIBLE_DEVICES%%,*}} bash {REPO}/run_curve_eval.sh {name}\n'
                  + after_eval + '\n')
-    return sbatch(G2 + ['-t', '06:00:00', '--nice=1000', '-J', name, '-o', f'{LOG}/{name}-%j.out',
+    return sbatch(G2 + ['-t', '06:00:00', f'--nice={NICE_SHORT}', '-J', name, '-o', f'{LOG}/{name}-%j.out',
                         '--wrap', f'exec bash {path}'])
 
 
@@ -230,7 +234,7 @@ def fe_sched(i, L):
 
 def submit_full(st, i, L=None, nice=0):
     """Pick i trained to T: last jump fixed-from-end of its pick length L (the default rule), or proportional (L None,
-    low priority: only for GPUs nothing else would use)."""
+    lowest of our jobs)."""
     name = full_name(i) + (f'_feL{L}' if L else '')
     sched = fe_sched(i, L) if L else f'{SCHED_DIR}/s{i:02d}.json'
     e = env({'CURVE_DATA': SRC, 'CURVE_SCHED': f'file:{sched}', 'CURVE_MIMG': f'{T_KIMG / 1000:g}',
@@ -304,15 +308,14 @@ def topup():
 
 
 def submit_prop():
-    """Low-priority proportional versions of the picks (user, 2026-10-14): submit by hand only onto GPUs nothing of
-    ours or anyone else's would use."""
+    """Proportional versions of the picks (user, 2026-10-14): lowest priority among OUR jobs, submitted by hand."""
     with open(STATE + '.lock', 'w') as lk:
         fcntl.flock(lk, fcntl.LOCK_EX)
         st = load()
         for i in sorted({p['pick'] for p in st['picks'].values()}):
             if str(i) in st['full']:
                 continue
-            t, ev = submit_full(st, i, None, nice=10000)
+            t, ev = submit_full(st, i, None, nice=NICE_PROP)
             st['full'][str(i)] = {'name': full_name(i), 'job': t, 'eval_job': ev, 'submitted': time.strftime('%F %T')}
             print('proportional to T', full_name(i), t, ev)
         save(st)
