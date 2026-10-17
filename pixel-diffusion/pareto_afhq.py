@@ -178,7 +178,7 @@ def sbatch(args):
 def env(extra):
     # every variable set explicitly: a job submitted from inside another job must not inherit its settings
     base = {'AMBIENT_BASE': AMBIENT_BASE, 'CURVE_DROPOUT': '0.25', 'CURVE_EXTRA': '', 'CURVE_REF': FULL_REF,
-            'CURVE_EVAL_RESUBMIT': '0', 'CURVE_EVAL_NOWAIT': '1', 'CURVE_REF2': '', 'CURVE_MIND_REF2': '0'}
+            'CURVE_EVAL_RESUBMIT': '0', 'CURVE_SEED': '0', 'CURVE_EVAL_NOWAIT': '1', 'CURVE_REF2': '', 'CURVE_MIND_REF2': '0'}
     base.update(extra)
     return 'export ' + ' '.join(f'{k}="{v}"' for k, v in base.items()) + '; '
 
@@ -289,10 +289,11 @@ FT_SWITCH = 0.75     # same switch point as the Ambient-o-then-clean baseline an
 HOLDOUT = f'{AMBIENT_BASE}/afhqdog_processed/val_64'     # 500 clean dogs never trained on (held-out loss curve)
 
 
-def submit_baseline(name, data, sched):
+def submit_baseline(name, data, sched, extra=None):
     """A baseline trained to T, scored at EVERY saved snapshot (512 kimg, 10k samples) so its best snapshot <= T can be
     reported, then its held-out denoising loss by noise level at every snapshot (own output file, merged by the page)."""
-    e = env({'CURVE_DATA': data, 'CURVE_SCHED': sched, 'CURVE_MIMG': f'{T_KIMG / 1000:g}', 'CURVE_LR_RAMP': '100'})
+    e = env({'CURVE_DATA': data, 'CURVE_SCHED': sched, 'CURVE_MIMG': f'{T_KIMG / 1000:g}', 'CURVE_LR_RAMP': '100',
+             **(extra or {})})
     t = sbatch(G2 + ['-t', '06:00:00', '-J', name, '-o', f'{LOG}/{name}-%j.out',
                      '--wrap', e + f'exec bash {REPO}/run_curve.sh {name}'])
     print(name, 'train', t)
@@ -355,6 +356,18 @@ def submit_lastfe(i, L):
     submit_baseline(f'par_afhq_T_s{i:02d}_lastfe', SRC, f'file:{path}')
 
 
+def submit_seeds(seeds=(1, 2)):
+    """More training seeds at T for the significance test (user, 2026-10-17): Ambient-o and our two picks, all jumps
+    proportional (s02 picked at L=1024, s06 at L=512). Seed 0 is the existing run of each. Same seeds for every
+    method; scored at every snapshot so each run is reported at its best snapshot <= T."""
+    runs = {'afhq_ambo': (AMBO_SRC, 'annot', {'CURVE_EXTRA': '--cls_ema_window=1'}),
+            'par_afhq_T_s02': (SRC, f'file:{SCHED_DIR}/s02.json', {}),
+            'par_afhq_T_s06': (SRC, f'file:{SCHED_DIR}/s06.json', {})}
+    for sd in seeds:
+        for name, (data, sched, extra) in runs.items():
+            submit_baseline(f'{name}_seed{sd}', data, sched, {**extra, 'CURVE_SEED': str(sd)})
+
+
 def submit_oracle():
     """Idealised upper-bound baseline: all 4,739 training dogs clean (no blur at all), no schedule."""
     submit_baseline('par_afhq_T_oracle', 'afhqdog_oracle', 'none')
@@ -363,10 +376,10 @@ def submit_oracle():
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--name'); ap.add_argument('--after')
-    ap.add_argument('cmd', choices=['followups', 'build', 'init', 'topup', 'status', 'build_diag', 'submit_diag', 'submit_finetune', 'submit_oracle', 'submit_s02_lastjump', 'submit_s06_lastfe'])
+    ap.add_argument('cmd', choices=['followups', 'build', 'init', 'topup', 'status', 'build_diag', 'submit_diag', 'submit_finetune', 'submit_oracle', 'submit_s02_lastjump', 'submit_s06_lastfe', 'submit_seeds'])
     a = ap.parse_args()
     if a.cmd == 'followups':
         followups(a.name, a.after); raise SystemExit
     {'build': build, 'init': init, 'topup': topup, 'status': status, 'build_diag': build_diag,
      'submit_diag': submit_diag, 'submit_finetune': submit_finetune, 'submit_oracle': submit_oracle, 'submit_s02_lastjump': submit_s02_lastjump,
-     'submit_s06_lastfe': lambda: submit_lastfe(6, 512)}[a.cmd]()
+     'submit_s06_lastfe': lambda: submit_lastfe(6, 512), 'submit_seeds': submit_seeds}[a.cmd]()

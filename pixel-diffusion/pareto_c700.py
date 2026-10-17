@@ -51,6 +51,10 @@ X = '--exclude=node[4004,4007-4008,5003-5005,5101,5103-5104,5106,5202-5204]'
 # our jobs onto free GPUs). Offsets are tiny next to the ~250k priorities, so they barely move us against other users.
 # Full runs to T: nice 0; short runs: NICE_SHORT; proportional copies: NICE_PROP. (scontrol top is disabled here.)
 NICE_SHORT, NICE_PROP = 10, 20
+# since 2026-10-17 (proportional rule, more seeds): first the proportional versions of s04 and s07, then the AFHQ seeds
+# (pareto_afhq.py, nice 2), then the CelebA seeds, then the other picks' proportional versions
+NICE_FIRST, NICE_SEED, NICE_PICK = 0, 4, 8
+FIRST = (4, 7)
 G2 = (f'{X} -p ou_sloan_gpu,sched_mit_sloan_gpu_r8,mit_normal_gpu,mit_preemptable --gres=gpu:2 -c 16 --mem=128G '
       f'--requeue --signal=B:USR1@600').split()
 G1 = f'{X} -p sched_mit_sloan_gpu_r8,ou_sloan_gpu,mit_normal_gpu --gres=gpu:1 -c 8 --mem=96G -t 06:00:00'.split()
@@ -162,7 +166,7 @@ def sbatch(args):
 def env(extra):
     # every variable set explicitly: a job submitted from inside another job must not inherit its settings
     base = {'AMBIENT_BASE': AMBIENT_BASE, 'CURVE_DROPOUT': '0.05', 'CURVE_EXTRA': '', 'CURVE_REF': FULL_REF,
-            'CURVE_EVAL_RESUBMIT': '0', 'CURVE_EVAL_NOWAIT': '1', 'CURVE_REF2': TEST_REF, 'CURVE_MIND_REF2': '0'}
+            'CURVE_EVAL_RESUBMIT': '0', 'CURVE_SEED': '0', 'CURVE_EVAL_NOWAIT': '1', 'CURVE_REF2': TEST_REF, 'CURVE_MIND_REF2': '0'}
     base.update(extra)
     return 'export ' + ' '.join(f'{k}="{v}"' for k, v in base.items()) + '; '
 
@@ -243,13 +247,13 @@ def fe_sched(i, L):
     return path
 
 
-def submit_full(st, i, L=None, nice=0):
-    """Pick i trained to T: last jump fixed-from-end of its pick length L (the default rule), or proportional (L None,
-    lowest of our jobs)."""
-    name = full_name(i) + (f'_feL{L}' if L else '')
+def submit_full(st, i, L=None, nice=0, seed=0):
+    """Pick i trained to T with all jumps proportional (L None: the rule since 2026-10-17), or with its last jump
+    fixed-from-end of its pick length L (the rule until then). seed > 0: another training seed (name _seed<n>)."""
+    name = full_name(i) + (f'_feL{L}' if L else '') + (f'_seed{seed}' if seed else '')
     sched = fe_sched(i, L) if L else f'{SCHED_DIR}/s{i:02d}.json'
     e = env({'CURVE_DATA': SRC, 'CURVE_SCHED': f'file:{sched}', 'CURVE_MIMG': f'{T_KIMG / 1000:g}',
-             'CURVE_LR_RAMP': '100'})
+             'CURVE_LR_RAMP': '100', 'CURVE_SEED': str(seed)})
     t = sbatch(G2 + ['-t', '06:00:00'] + ([f'--nice={nice}'] if nice else []) + ['-J', name, '-o', f'{LOG}/{name}-%j.out',
                      '--wrap', e + f'exec bash {REPO}/run_curve.sh {name}'])
     ck = ' '.join(f'--ckpt {name}:{AMBIENT_BASE}/train_outputs/curve/{name}/network-snapshot-{k:06d}.pkl'
@@ -321,41 +325,69 @@ def topup():
                                     'pick_fid': int(np.argmin([r['fid_ref2'] for r in rs])),
                                     'decided': time.strftime('%F %T')}
                 print('pick', key, st['picks'][key])
-        for key, p in st['picks'].items():             # each distinct (pick, L) to T, last jump fixed-from-end
-            i, L = p['pick'], int(key.split('_')[0][1:])
-            k = f'{i}_feL{L}'
-            q = st['full'].get(k)
-            if q is None or str(q.get('job', 'ERR')).startswith('ERR'):
-                t, ev = submit_full(st, i, L)
-                st['full'][k] = {'name': f'{full_name(i)}_feL{L}', 'job': t, 'eval_job': ev,
-                                 'submitted': time.strftime('%F %T')}
-                print('scaled to T (last jump fixed-from-end)', k, t, ev)
-        # where held-out FID picks a different schedule: also to T, but lowest priority among our jobs (user,
-        # 2026-10-15: "nice to have, not necessary", for idle GPUs)
+        # each distinct pick to T with all jumps proportional (user, 2026-10-17; a schedule picked at several (L, N) is
+        # one run). Where held-out FID picks a different schedule, that one too, at our lowest priority.
         for key, p in st['picks'].items():
-            i, L = p['pick_fid'], int(key.split('_')[0][1:])
-            k = f'{i}_feL{L}'
-            if i == p['pick'] or k in st['full'] and not str(st['full'][k].get('job', 'ERR')).startswith('ERR'):
-                continue
-            t, ev = submit_full(st, i, L, nice=NICE_PROP)
-            st['full'][k] = {'name': f'{full_name(i)}_feL{L}', 'job': t, 'eval_job': ev, 'fid_pick': key,
-                             'submitted': time.strftime('%F %T')}
-            print('FID pick to T (last jump fixed-from-end, low priority)', k, t, ev)
+            for i, nice, tag in ((p['pick'], NICE_PICK, {}), (p['pick_fid'], NICE_PROP, {'fid_pick': True})):
+                q = st['full'].get(str(i))
+                if q is not None and not str(q.get('job', 'ERR')).startswith('ERR'):
+                    continue
+                t, ev = submit_full(st, i, None, nice=nice)
+                st['full'][str(i)] = {'name': full_name(i), 'job': t, 'eval_job': ev, 'submitted': time.strftime('%F %T'),
+                                      **tag}
+                print('proportional to T', full_name(i), t, ev)
         save(st)
     sloan_slots()
 
 
 def submit_prop():
-    """Proportional versions of the picks (user, 2026-10-14): lowest priority among OUR jobs, submitted by hand."""
+    """Proportional versions of every pick made so far (user, 2026-10-17: the method's rule from now on); s04 and s07
+    first, FID-only picks last."""
     with open(STATE + '.lock', 'w') as lk:
         fcntl.flock(lk, fcntl.LOCK_EX)
         st = load()
-        for i in sorted({p['pick'] for p in st['picks'].values()}):
+        mind = {p['pick'] for p in st['picks'].values()}
+        fid = {p['pick_fid'] for p in st['picks'].values()} - mind
+        for i in sorted(mind | fid, key=lambda i: (i not in FIRST, i in fid, i)):
             if str(i) in st['full']:
                 continue
-            t, ev = submit_full(st, i, None, nice=NICE_PROP)
-            st['full'][str(i)] = {'name': full_name(i), 'job': t, 'eval_job': ev, 'submitted': time.strftime('%F %T')}
-            print('proportional to T', full_name(i), t, ev)
+            nice = NICE_FIRST if i in FIRST else NICE_PROP if i in fid else NICE_PICK
+            t, ev = submit_full(st, i, None, nice=nice)
+            st['full'][str(i)] = {'name': full_name(i), 'job': t, 'eval_job': ev, 'submitted': time.strftime('%F %T'),
+                                  **({'fid_pick': True} if i in fid else {})}
+            print('proportional to T', full_name(i), 'nice', nice, t, ev)
+        save(st)
+
+
+def submit_ambo(name, seed):
+    """Ambient-o at T (per-image annotations, as c700_ambo) with another training seed."""
+    e = env({'CURVE_DATA': AMBO_SRC, 'CURVE_SCHED': 'annot', 'CURVE_EXTRA': '--cls_ema_window=1',
+             'CURVE_MIMG': f'{T_KIMG / 1000:g}', 'CURVE_LR_RAMP': '100', 'CURVE_SEED': str(seed)})
+    t = sbatch(G2 + ['-t', '06:00:00', f'--nice={NICE_SEED}', '-J', name, '-o', f'{LOG}/{name}-%j.out',
+                     '--wrap', e + f'exec bash {REPO}/run_curve.sh {name}'])
+    ck = ' '.join(f'--ckpt {name}:{AMBIENT_BASE}/train_outputs/curve/{name}/network-snapshot-{k:06d}.pkl'
+                  for k in range(1024, T_KIMG + 1, 1024))
+    sbatch(G1 + [f'--dependency=afterok:{t}', '-J', f'losscurve_{name}', '-o', f'{LOG}/losscurve_{name}-%j.out',
+                 '--wrap', f'export AMBIENT_BASE={AMBIENT_BASE}; cd {REPO} && exec {PY} analysis/eval_holdout_loss_curve.py '
+                 f'--holdout_dir {HOLDOUT} --out {AMBIENT_BASE}/generated/pareto/c700_losscurve_{name}.json {ck}'])
+    return t, submit_scoring(name, t)
+
+
+def submit_seeds(seeds=(1, 2)):
+    """More training seeds at T for the significance test (user, 2026-10-17): Ambient-o and the proportional versions
+    of s04 (picked at L=1024) and s07 (picked at L=2048 and 4096). Seed 0 = the existing / proportional run."""
+    with open(STATE + '.lock', 'w') as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        st = load()
+        st.setdefault('seeds', {})
+        for sd in seeds:
+            for i in (None,) + FIRST:
+                name = f'c700_ambo_seed{sd}' if i is None else f'{full_name(i)}_seed{sd}'
+                if name in st['seeds']:
+                    continue
+                t, ev = submit_ambo(name, sd) if i is None else submit_full(st, i, None, nice=NICE_SEED, seed=sd)
+                st['seeds'][name] = {'job': t, 'eval_job': ev, 'submitted': time.strftime('%F %T')}
+                print('seed', name, t, ev)
         save(st)
 
 
@@ -376,7 +408,7 @@ def status():
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['build', 'build_diag', 'init', 'submit_diag', 'topup', 'status', 'submit_prop', 'slots'])
+    ap.add_argument('cmd', choices=['build', 'build_diag', 'init', 'submit_diag', 'topup', 'status', 'submit_prop', 'submit_seeds', 'slots'])
     a = ap.parse_args()
     {'build': build, 'build_diag': build_diag, 'init': init, 'submit_diag': submit_diag, 'topup': topup, 'slots': sloan_slots,
-     'status': status, 'submit_prop': submit_prop}[a.cmd]()
+     'status': status, 'submit_prop': submit_prop, 'submit_seeds': submit_seeds}[a.cmd]()

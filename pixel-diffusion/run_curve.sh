@@ -66,7 +66,7 @@ STATE=$(ls -1 "$RUNDIR"/training-state-*.pt 2>/dev/null | sort -V | tail -1)
 [ -n "$STATE" ] && RESUME="--resume=$STATE"
 echo "=== curve $NAME | $(hostname) | $(date) ==="
 echo "    data $DATA ($(wc -l < "$DATA/annotations.jsonl") annotations) | dropout $CURVE_DROPOUT | to ${MIMG} Mimg"
-echo "    schedule: ${SCHED:-none} | LR warm-up ${CURVE_LR_RAMP:-100} kimg | extra: ${CURVE_EXTRA:-} | ${RESUME:-fresh start}"
+echo "    schedule: ${SCHED:-none} | LR warm-up ${CURVE_LR_RAMP:-100} kimg | seed ${CURVE_SEED:-0} | extra: ${CURVE_EXTRA:-} | ${RESUME:-fresh start}"
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
 
 # Self-requeue before a partition time limit (submit with --requeue --signal=B:USR1@600); resumes from the newest dump.
@@ -80,7 +80,7 @@ python -m torch.distributed.run --standalone --nproc_per_node="$NGPU" train.py \
     --dropout="$CURVE_DROPOUT" --augment=0.15 --clip=1.0 --fp16=0 \
     --tick=64 --snap=8 --dump=8 \
     --corruption_probability=0.0 --noise_config=identity --s_max=4 \
-    --cache=False --workers=8 --duration="$MIMG" --seed=0 \
+    --cache=False --workers=8 --duration="$MIMG" --seed="${CURVE_SEED:-0}" \
     "${SCHED_ARG[@]}" $RESUME ${CURVE_EXTRA:-} &
 TRAIN_PID=$!
 wait $TRAIN_PID
