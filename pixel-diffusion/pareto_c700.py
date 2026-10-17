@@ -58,6 +58,9 @@ FIRST = (4, 7)
 G2 = (f'{X} -p ou_sloan_gpu,sched_mit_sloan_gpu_r8,mit_normal_gpu,mit_preemptable --gres=gpu:2 -c 16 --mem=128G '
       f'--requeue --signal=B:USR1@600').split()
 G1 = f'{X} -p sched_mit_sloan_gpu_r8,ou_sloan_gpu,mit_normal_gpu --gres=gpu:1 -c 8 --mem=96G -t 06:00:00'.split()
+# jobs waiting on a dependency list only the Sloan A100 partition (no per-user submit cap): mit_normal_gpu allows 64
+# queued jobs per user and every scoring job counted against it; sloan_slots() widens them once they are ready
+G1D = f'{X} -p sched_mit_sloan_gpu_r8 --gres=gpu:1 -c 8 --mem=96G -t 06:00:00'.split()
 
 
 def short_name(L, i): return f'par_c700_L{L}_s{i:02d}'
@@ -228,7 +231,7 @@ def submit_diag():
 def submit_scoring(name, after):
     # scoring every 512-kimg snapshot (30 at T) at 10k samples: ~8 per 6-h job, so split into 4 interleaved jobs
     ks = list(range(512, T_KIMG + 1, 512))
-    return ','.join(sbatch(G1 + [f'--dependency=afterok:{after}', '-J', f'ceval_{name}', '-o', f'{LOG}/eval_{name}-%j.out',
+    return ','.join(sbatch(G1D + [f'--dependency=afterok:{after}', '-J', f'ceval_{name}', '-o', f'{LOG}/eval_{name}-%j.out',
                                  '--wrap', env({'CURVE_FINAL_KIMG': str(T_KIMG), 'CURVE_EVAL_KIMGS': ' '.join(map(str, ks[j::4]))})
                                  + f'exec bash {REPO}/run_curve_eval.sh {name}']) for j in range(4))
 
@@ -258,7 +261,7 @@ def submit_full(st, i, L=None, nice=0, seed=0):
                      '--wrap', e + f'exec bash {REPO}/run_curve.sh {name}'])
     ck = ' '.join(f'--ckpt {name}:{AMBIENT_BASE}/train_outputs/curve/{name}/network-snapshot-{k:06d}.pkl'
                   for k in range(1024, T_KIMG + 1, 1024))
-    sbatch(G1 + [f'--dependency=afterok:{t}', '-J', f'losscurve_{name}', '-o', f'{LOG}/losscurve_{name}-%j.out',
+    sbatch(G1D + [f'--dependency=afterok:{t}', '-J', f'losscurve_{name}', '-o', f'{LOG}/losscurve_{name}-%j.out',
                  '--wrap', f'export AMBIENT_BASE={AMBIENT_BASE}; cd {REPO} && exec {PY} analysis/eval_holdout_loss_curve.py '
                  f'--holdout_dir {HOLDOUT} --out {AMBIENT_BASE}/generated/pareto/c700_losscurve_{name}.json {ck}'])
     return t, submit_scoring(name, t)
@@ -275,19 +278,21 @@ def pending_jobs():
     return sum(1 for j in r.stdout.split() if j.startswith('par_c700_'))
 
 
-def sloan_slots(limit=24):
-    """ou_sloan_gpu allows 24 queued+running jobs per user. Give its free slots to our pending jobs that are ready to
-    run (not waiting on a dependency) and lack it, highest Slurm priority first (runs to T before short runs)."""
-    q = subprocess.run(['squeue', '-u', os.environ.get('USER', 'honjar'), '-h', '-o', '%i|%P|%T|%r|%Q|%b|%j'],
-                       capture_output=True, text=True).stdout.split('\n')
-    rows = [l.split('|') for l in q if l.count('|') == 6]
-    used = sum('ou_sloan_gpu' in r[1].split(',') for r in rows)
-    want = [r for r in rows if r[2] == 'PENDING' and r[3] != 'Dependency' and 'ou_sloan_gpu' not in r[1].split(',')
-            and r[1] != 'ou_sloan_gpu' and 'gpu' in r[5] and not any(t in r[5] for t in ('a100', 'l40s', 'a40', 'rtx'))]
-    for r in sorted(want, key=lambda r: -int(r[4]))[:max(0, limit - used)]:
-        res = subprocess.run(['scontrol', 'update', f'JobId={r[0]}', f'Partition=ou_sloan_gpu,{r[1]}'],
-                             capture_output=True, text=True)
-        print('ou_sloan_gpu slot ->', r[6], r[0], res.stderr.strip())
+def sloan_slots(caps=(('ou_sloan_gpu', 24), ('mit_normal_gpu', 60))):
+    """ou_sloan_gpu allows 24 and mit_normal_gpu 64 queued+running jobs per user (each job counts against every
+    partition it lists). Give their free slots to our pending jobs that are ready to run (not waiting on a dependency)
+    and lack the partition, highest Slurm priority first (runs to T before short runs)."""
+    for part, limit in caps:
+        q = subprocess.run(['squeue', '-u', os.environ.get('USER', 'honjar'), '-h', '-o', '%i|%P|%T|%r|%Q|%b|%j'],
+                           capture_output=True, text=True).stdout.split('\n')
+        rows = [l.split('|') for l in q if l.count('|') == 6]
+        used = sum(part in r[1].split(',') for r in rows)
+        want = [r for r in rows if r[2] == 'PENDING' and r[3] != 'Dependency' and part not in r[1].split(',')
+                and 'gpu' in r[5] and not any(t in r[5] for t in ('a100', 'l40s', 'a40', 'rtx'))]
+        for r in sorted(want, key=lambda r: -int(r[4]))[:max(0, limit - used)]:
+            res = subprocess.run(['scontrol', 'update', f'JobId={r[0]}', f'Partition={part},{r[1]}'],
+                                 capture_output=True, text=True)
+            print(part, 'slot ->', r[6], r[0], res.stderr.strip())
 
 
 def topup():
@@ -367,7 +372,7 @@ def submit_ambo(name, seed):
                      '--wrap', e + f'exec bash {REPO}/run_curve.sh {name}'])
     ck = ' '.join(f'--ckpt {name}:{AMBIENT_BASE}/train_outputs/curve/{name}/network-snapshot-{k:06d}.pkl'
                   for k in range(1024, T_KIMG + 1, 1024))
-    sbatch(G1 + [f'--dependency=afterok:{t}', '-J', f'losscurve_{name}', '-o', f'{LOG}/losscurve_{name}-%j.out',
+    sbatch(G1D + [f'--dependency=afterok:{t}', '-J', f'losscurve_{name}', '-o', f'{LOG}/losscurve_{name}-%j.out',
                  '--wrap', f'export AMBIENT_BASE={AMBIENT_BASE}; cd {REPO} && exec {PY} analysis/eval_holdout_loss_curve.py '
                  f'--holdout_dir {HOLDOUT} --out {AMBIENT_BASE}/generated/pareto/c700_losscurve_{name}.json {ck}'])
     return t, submit_scoring(name, t)
@@ -383,7 +388,8 @@ def submit_seeds(seeds=(1, 2)):
         for sd in seeds:
             for i in (None,) + FIRST:
                 name = f'c700_ambo_seed{sd}' if i is None else f'{full_name(i)}_seed{sd}'
-                if name in st['seeds']:
+                q = st['seeds'].get(name)
+                if q and 'ERR' not in str(q['job']) + str(q['eval_job']):
                     continue
                 t, ev = submit_ambo(name, sd) if i is None else submit_full(st, i, None, nice=NICE_SEED, seed=sd)
                 st['seeds'][name] = {'job': t, 'eval_job': ev, 'submitted': time.strftime('%F %T')}

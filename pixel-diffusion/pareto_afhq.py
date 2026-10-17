@@ -47,6 +47,9 @@ X = '--exclude=node[4004,4007-4008,5003-5005,5101,5103-5104,5106,5202-5204]'
 G2 = (f'{X} -p ou_sloan_gpu,sched_mit_sloan_gpu_r8,mit_normal_gpu,mit_preemptable --gres=gpu:2 -c 16 --mem=128G '
       f'--requeue --signal=B:USR1@600').split()
 G1 = f'{X} -p sched_mit_sloan_gpu_r8,ou_sloan_gpu,mit_normal_gpu --gres=gpu:1 -c 8 --mem=96G -t 06:00:00'.split()
+# jobs waiting on a dependency list only the Sloan A100 partition (no per-user submit cap): mit_normal_gpu allows 64
+# queued jobs per user and every scoring job counted against it; sloan_slots() widens them once they are ready
+G1D = f'{X} -p sched_mit_sloan_gpu_r8 --gres=gpu:1 -c 8 --mem=96G -t 06:00:00'.split()
 
 
 def short_name(L, i): return f'par_afhq_L{L}_s{i:02d}'
@@ -202,7 +205,7 @@ def submit_full(st, i):
              'CURVE_LR_RAMP': '100'})
     t = sbatch(G2 + ['-t', '06:00:00', '-J', name, '-o', f'{LOG}/{name}-%j.out',
                      '--wrap', e + f'exec bash {REPO}/run_curve.sh {name}'])
-    ev = sbatch(G1 + [f'--dependency=afterok:{t}', '-J', f'ceval_{name}', '-o', f'{LOG}/eval_{name}-%j.out', '--wrap',
+    ev = sbatch(G1D + [f'--dependency=afterok:{t}', '-J', f'ceval_{name}', '-o', f'{LOG}/eval_{name}-%j.out', '--wrap',
                       env({'CURVE_FINAL_KIMG': str(T_KIMG), 'CURVE_EVAL_KIMGS': str(T_KIMG)})
                       + f'exec bash {REPO}/run_curve_eval.sh {name}'])
     return t, ev
@@ -257,7 +260,7 @@ def topup():
             i = p['pick']
             q = st['full'].get(str(i))
             if q is not None and not str(q.get('job', 'ERR')).startswith('ERR') and str(q.get('eval_job', 'ERR')).startswith('ERR'):
-                q['eval_job'] = sbatch(G1 + [f'--dependency=afterok:{q["job"]}', '-J', f'ceval_{q["name"]}', '-o',
+                q['eval_job'] = sbatch(G1D + [f'--dependency=afterok:{q["job"]}', '-J', f'ceval_{q["name"]}', '-o',
                                              f'{LOG}/eval_{q["name"]}-%j.out', '--wrap',
                                              env({'CURVE_FINAL_KIMG': str(T_KIMG), 'CURVE_EVAL_KIMGS': str(T_KIMG)})
                                              + f'exec bash {REPO}/run_curve_eval.sh {q["name"]}'])
@@ -303,7 +306,7 @@ def submit_baseline(name, data, sched, extra=None):
 def submit_scoring(name, after):
     # two jobs (alternate snapshots): one job scoring all 20 at 10k samples would not fit the 6-h limit
     ks = list(range(512, T_KIMG + 1, 512))
-    return ','.join(sbatch(G1 + [f'--dependency=afterok:{after}', '-J', f'ceval_{name}', '-o', f'{LOG}/eval_{name}-%j.out',
+    return ','.join(sbatch(G1D + [f'--dependency=afterok:{after}', '-J', f'ceval_{name}', '-o', f'{LOG}/eval_{name}-%j.out',
                                  '--wrap', env({'CURVE_FINAL_KIMG': str(T_KIMG), 'CURVE_EVAL_KIMGS': ' '.join(map(str, part))})
                                  + f'exec bash {REPO}/run_curve_eval.sh {name}']) for part in (ks[1::2], ks[0::2]))
 
@@ -322,7 +325,7 @@ def followups(name, after):
     py = f'{AMBIENT_BASE}/miniconda3/envs/ambient/bin/python'
     ck = ' '.join(f'--ckpt {name}:{AMBIENT_BASE}/train_outputs/curve/{name}/network-snapshot-{k:06d}.pkl'
                   for k in range(512, T_KIMG + 1, 512))
-    lc = sbatch(G1 + [f'--dependency=afterok:{after}', '-J', f'losscurve_{name}', '-o', f'{LOG}/losscurve_{name}-%j.out',
+    lc = sbatch(G1D + [f'--dependency=afterok:{after}', '-J', f'losscurve_{name}', '-o', f'{LOG}/losscurve_{name}-%j.out',
                       '--wrap', f'export AMBIENT_BASE={AMBIENT_BASE}; cd {REPO} && exec {py} analysis/eval_holdout_loss_curve.py '
                       f'--holdout_dir {HOLDOUT} --out {AMBIENT_BASE}/generated/pareto/afhq_losscurve_{name}.json {ck}'])
     print(name, 'eval', submit_scoring(name, after), 'losscurve', lc)
