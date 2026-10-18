@@ -152,11 +152,20 @@ def init():
     print('created', STATE, len(xs), 'schedules')
 
 
+def blackwell_ok():
+    """Training runs allowed on B200 / RTX PRO 6000 cards (newer torch, see run_curve.sh). Not the seed runs or the
+    seed-0 runs they are compared with (user, 2026-10-17: no extra GPU noise in the careful comparisons)."""
+    p = f'{AMBIENT_BASE}/generated/pareto/blackwell_ok.txt'
+    return set(open(p).read().split()) if os.path.exists(p) else set()
+
+
 def sbatch(args):
     """sbatch; if ou_sloan_gpu's per-user submit limit (QOS, 24 queued) is hit, retry without that partition."""
     if any(x.startswith('--dependency') for x in args):     # a job only waiting must not hold one of the 24 slots;
         args = list(args); i = args.index('-p')                 # sloan_slots() adds ou_sloan_gpu back once it is ready
         args[i + 1] = ','.join(p for p in args[i + 1].split(',') if p != 'ou_sloan_gpu')
+    if args[args.index('-J') + 1] in blackwell_ok():           # cleared to train on Blackwell (run_curve.sh): no exclude
+        args = [a for a in args if not a.startswith('--exclude=')]
     r = subprocess.run(['sbatch', '--parsable'] + args, capture_output=True, text=True)
     if r.returncode != 0 and 'QOSMaxSubmitJobPerUserLimit' in r.stderr:
         a = list(args)

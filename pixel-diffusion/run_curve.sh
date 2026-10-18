@@ -31,6 +31,19 @@ NAME=${1:?usage: run_curve.sh <name>}
 : "${CURVE_DATA:?}" "${CURVE_DROPOUT:?}"
 MIMG=${CURVE_MIMG:-20.48}
 export PATH=${AMBIENT_BASE}/miniconda3/envs/ambient/bin:$PATH
+# Blackwell cards (B200 = sm_100, RTX PRO 6000 = sm_120) need a newer torch than envs/ambient's 2.6. Only runs
+# listed in generated/pareto/blackwell_ok.txt (one name per line) train there, with envs/ambient_bw: the same
+# packages with torch 2.7.1+cu128. Scoring never runs there, so every FID/MIND number comes from one software stack.
+GPU0=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
+case "$GPU0" in
+    *B200*|*"RTX PRO 6000"*)
+        if grep -qx "$NAME" "${AMBIENT_BASE}/generated/pareto/blackwell_ok.txt" 2>/dev/null; then
+            export PATH=${AMBIENT_BASE}/miniconda3/envs/ambient_bw/bin:$PATH
+            echo "Blackwell GPU ($GPU0): training with envs/ambient_bw"
+        else
+            echo "ERROR: $NAME is not cleared for Blackwell GPUs ($GPU0); torch 2.6 cannot run here"; exit 1
+        fi ;;
+esac
 export PYTHONPATH=${AMBIENT_BASE}/ambient-omni/pixel-diffusion
 export HF_HOME=${AMBIENT_BASE}/.cache/huggingface TORCH_HOME=${AMBIENT_BASE}/.cache/torch
 export MASTER_ADDR=localhost MASTER_PORT=$((31000 + RANDOM % 900))
