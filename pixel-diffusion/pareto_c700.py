@@ -46,7 +46,8 @@ SCHED_DIR = f'{AMBIENT_BASE}/generated/pareto/c700_schedules'
 LOG = f'{AMBIENT_BASE}/train_logs/pareto'
 REPO = f'{AMBIENT_BASE}/ambient-omni/pixel-diffusion'
 PY = f'{AMBIENT_BASE}/miniconda3/envs/ambient/bin/python'
-X = '--exclude=node[4004,4007-4008,5003-5005,5101,5103-5104,5106,5202-5204],node5801-c1,node5802-c1'  # B200 (sm_100): our torch 2.6 cannot run there
+XRTX = '--exclude=node[4004,4007-4008,5003-5005,5101,5103-5104,5106,5202-5204]'   # RTX PRO 6000 (sm_120)
+X = XRTX + ',node5801-c1,node5802-c1'  # + B200 (sm_100): our torch 2.6 runs on neither
 # Order among our own jobs only (user, 2026-10-14: "low priority" means relative to our other jobs; always try to get
 # our jobs onto free GPUs). Offsets are tiny next to the ~250k priorities, so they barely move us against other users.
 # Full runs to T: nice 0; short runs: NICE_SHORT; proportional copies: NICE_PROP. (scontrol top is disabled here.)
@@ -164,8 +165,8 @@ def sbatch(args):
     if any(x.startswith('--dependency') for x in args):     # a job only waiting must not hold one of the 24 slots;
         args = list(args); i = args.index('-p')                 # sloan_slots() adds ou_sloan_gpu back once it is ready
         args[i + 1] = ','.join(p for p in args[i + 1].split(',') if p != 'ou_sloan_gpu')
-    if args[args.index('-J') + 1] in blackwell_ok():           # cleared to train on Blackwell (run_curve.sh): no exclude
-        args = [a for a in args if not a.startswith('--exclude=')]
+    if args[args.index('-J') + 1] in blackwell_ok():           # cleared to train on B200 (run_curve.sh); RTX PRO 6000
+        args = [XRTX if a == X else a for a in args]            # stays excluded (illegal memory access in NCCL there)
     r = subprocess.run(['sbatch', '--parsable'] + args, capture_output=True, text=True)
     if r.returncode != 0 and 'QOSMaxSubmitJobPerUserLimit' in r.stderr:
         a = list(args)

@@ -31,21 +31,20 @@ NAME=${1:?usage: run_curve.sh <name>}
 : "${CURVE_DATA:?}" "${CURVE_DROPOUT:?}"
 MIMG=${CURVE_MIMG:-20.48}
 export PATH=${AMBIENT_BASE}/miniconda3/envs/ambient/bin:$PATH
-# Blackwell cards (B200 = sm_100, RTX PRO 6000 = sm_120) need a newer torch than envs/ambient's 2.6. Only runs
-# listed in generated/pareto/blackwell_ok.txt (one name per line) train there, with envs/ambient_bw: the same
-# packages with torch 2.7.1+cu128. Scoring never runs there, so every FID/MIND number comes from one software stack.
+# Blackwell cards need a newer torch than envs/ambient's 2.6. B200 (sm_100): only runs listed in
+# generated/pareto/blackwell_ok.txt (one name per line) train there, with envs/ambient_bw = the same packages with
+# torch 2.7.1+cu128. Scoring never runs there, so every FID/MIND number comes from one software stack.
+# RTX PRO 6000 (sm_120): not used -- NCCL hit an illegal memory access there (node5204, 2026-10-18).
 GPU0=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
 case "$GPU0" in
-    *B200*|*"RTX PRO 6000"*)
+    *B200*)
         if grep -qx "$NAME" "${AMBIENT_BASE}/generated/pareto/blackwell_ok.txt" 2>/dev/null; then
             export PATH=${AMBIENT_BASE}/miniconda3/envs/ambient_bw/bin:$PATH
-            echo "Blackwell GPU ($GPU0): training with envs/ambient_bw"
-            # PCIe RTX cards hang at the first NCCL collective with peer-to-peer on (seen on node5204); this only
-            # changes how the two GPUs exchange data, not what is computed
-            case "$GPU0" in *RTX*) export NCCL_P2P_DISABLE=1 ;; esac
+            echo "B200 GPU: training with envs/ambient_bw"
         else
-            echo "ERROR: $NAME is not cleared for Blackwell GPUs ($GPU0); torch 2.6 cannot run here"; exit 1
+            echo "ERROR: $NAME is not cleared for B200 GPUs; torch 2.6 cannot run here"; exit 1
         fi ;;
+    *"RTX PRO 6000"*) echo "ERROR: RTX PRO 6000 GPUs are not used (see run_curve.sh)"; exit 1 ;;
 esac
 export PYTHONPATH=${AMBIENT_BASE}/ambient-omni/pixel-diffusion
 export HF_HOME=${AMBIENT_BASE}/.cache/huggingface TORCH_HOME=${AMBIENT_BASE}/.cache/torch
