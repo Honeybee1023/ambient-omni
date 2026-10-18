@@ -64,7 +64,13 @@ fi
 NGPU=$(python -c "import torch;print(torch.cuda.device_count())")
 # Total batch is always 256; 2 GPUs = 128 each, 4 GPUs = 64 each (no accumulation either way). A run may move
 # between the two at a resume.
-case "$NGPU" in 2|4) ;; *) echo "ERROR: curve runs need 2 or 4 GPUs (batch 256), got $NGPU"; exit 1 ;; esac
+# Slurm has handed a job asking for 2 GPUs only 1 (node4400, 2026-10-18): requeue (up to 3 times) instead of dying.
+case "$NGPU" in 2|4) ;; *)
+    echo "ERROR: curve runs need 2 or 4 GPUs (batch 256), got $NGPU"
+    if [ -n "${SLURM_JOB_ID:-}" ] && [ "${SLURM_RESTART_COUNT:-0}" -lt 3 ]; then
+        echo "requeueing $SLURM_JOB_ID (restart ${SLURM_RESTART_COUNT:-0})"; scontrol requeue "$SLURM_JOB_ID"; exit 0
+    fi
+    exit 1 ;; esac
 [ -f "$DATA/annotations.jsonl" ] || { echo "ERROR: no $DATA/annotations.jsonl"; exit 1; }
 case "${CURVE_SCHED:-none}" in
     none)  SCHED="" ;;
