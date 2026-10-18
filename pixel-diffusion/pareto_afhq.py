@@ -43,7 +43,7 @@ STATE = f'{AMBIENT_BASE}/generated/pareto/afhq.json'
 SCHED_DIR = f'{AMBIENT_BASE}/generated/pareto/schedules'
 LOG = f'{AMBIENT_BASE}/train_logs/pareto'
 REPO = f'{AMBIENT_BASE}/ambient-omni/pixel-diffusion'
-X = '--exclude=node[4004,4007-4008,5003-5005,5101,5103-5104,5106,5202-5204],node[5801-5802]-c1'  # B200 (sm_100): our torch 2.6 cannot run there
+X = '--exclude=node[4004,4007-4008,5003-5005,5101,5103-5104,5106,5202-5204],node5801-c1,node5802-c1'  # B200 (sm_100): our torch 2.6 cannot run there
 G2 = (f'{X} -p ou_sloan_gpu,sched_mit_sloan_gpu_r8,mit_normal_gpu,mit_preemptable --gres=gpu:2 -c 16 --mem=128G '
       f'--requeue --signal=B:USR1@600').split()
 G1 = f'{X} -p sched_mit_sloan_gpu_r8,ou_sloan_gpu,mit_normal_gpu --gres=gpu:1 -c 8 --mem=96G -t 06:00:00'.split()

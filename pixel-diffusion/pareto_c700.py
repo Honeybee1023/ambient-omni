@@ -46,7 +46,7 @@ SCHED_DIR = f'{AMBIENT_BASE}/generated/pareto/c700_schedules'
 LOG = f'{AMBIENT_BASE}/train_logs/pareto'
 REPO = f'{AMBIENT_BASE}/ambient-omni/pixel-diffusion'
 PY = f'{AMBIENT_BASE}/miniconda3/envs/ambient/bin/python'
-X = '--exclude=node[4004,4007-4008,5003-5005,5101,5103-5104,5106,5202-5204],node[5801-5802]-c1'  # B200 (sm_100): our torch 2.6 cannot run there
+X = '--exclude=node[4004,4007-4008,5003-5005,5101,5103-5104,5106,5202-5204],node5801-c1,node5802-c1'  # B200 (sm_100): our torch 2.6 cannot run there
 # Order among our own jobs only (user, 2026-10-14: "low priority" means relative to our other jobs; always try to get
 # our jobs onto free GPUs). Offsets are tiny next to the ~250k priorities, so they barely move us against other users.
 # Full runs to T: nice 0; short runs: NICE_SHORT; proportional copies: NICE_PROP. (scontrol top is disabled here.)
