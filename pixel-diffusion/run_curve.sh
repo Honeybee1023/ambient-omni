@@ -40,6 +40,9 @@ case "$GPU0" in
         if grep -qx "$NAME" "${AMBIENT_BASE}/generated/pareto/blackwell_ok.txt" 2>/dev/null; then
             export PATH=${AMBIENT_BASE}/miniconda3/envs/ambient_bw/bin:$PATH
             echo "Blackwell GPU ($GPU0): training with envs/ambient_bw"
+            # PCIe RTX cards hang at the first NCCL collective with peer-to-peer on (seen on node5204); this only
+            # changes how the two GPUs exchange data, not what is computed
+            case "$GPU0" in *RTX*) export NCCL_P2P_DISABLE=1 ;; esac
         else
             echo "ERROR: $NAME is not cleared for Blackwell GPUs ($GPU0); torch 2.6 cannot run here"; exit 1
         fi ;;
