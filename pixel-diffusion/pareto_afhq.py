@@ -43,7 +43,7 @@ STATE = f'{AMBIENT_BASE}/generated/pareto/afhq.json'
 SCHED_DIR = f'{AMBIENT_BASE}/generated/pareto/schedules'
 LOG = f'{AMBIENT_BASE}/train_logs/pareto'
 REPO = f'{AMBIENT_BASE}/ambient-omni/pixel-diffusion'
-X = '--exclude=node[4004,4007-4008,5003-5005,5101,5103-5104,5106,5202-5204]'
+X = '--exclude=node[4004,4007-4008,5003-5005,5101,5103-5104,5106,5202-5204],node[5801-5802]-c1'  # B200 (sm_100): our torch 2.6 cannot run there
 G2 = (f'{X} -p ou_sloan_gpu,sched_mit_sloan_gpu_r8,mit_normal_gpu,mit_preemptable --gres=gpu:2 -c 16 --mem=128G '
       f'--requeue --signal=B:USR1@600').split()
 G1 = f'{X} -p sched_mit_sloan_gpu_r8,ou_sloan_gpu,mit_normal_gpu --gres=gpu:1 -c 8 --mem=96G -t 06:00:00'.split()
@@ -359,7 +359,7 @@ def submit_lastfe(i, L):
     submit_baseline(f'par_afhq_T_s{i:02d}_lastfe', SRC, f'file:{path}')
 
 
-def submit_seeds(seeds=(1, 2)):
+def submit_seeds(seeds=(1, 2), only=None):
     """More training seeds at T for the significance test (user, 2026-10-17): Ambient-o and our two picks, all jumps
     proportional (s02 picked at L=1024, s06 at L=512). Seed 0 is the existing run of each. Same seeds for every
     method; scored at every snapshot so each run is reported at its best snapshot <= T."""
@@ -368,6 +368,8 @@ def submit_seeds(seeds=(1, 2)):
             'par_afhq_T_s06': (SRC, f'file:{SCHED_DIR}/s06.json', {})}
     for sd in seeds:
         for name, (data, sched, extra) in runs.items():
+            if only and f'{name}_seed{sd}' not in only.split(','):    # --name a,b: resubmit only these
+                continue
             submit_baseline(f'{name}_seed{sd}', data, sched, {**extra, 'CURVE_SEED': str(sd)})
 
 
@@ -385,4 +387,4 @@ if __name__ == '__main__':
         followups(a.name, a.after); raise SystemExit
     {'build': build, 'init': init, 'topup': topup, 'status': status, 'build_diag': build_diag,
      'submit_diag': submit_diag, 'submit_finetune': submit_finetune, 'submit_oracle': submit_oracle, 'submit_s02_lastjump': submit_s02_lastjump,
-     'submit_s06_lastfe': lambda: submit_lastfe(6, 512), 'submit_seeds': submit_seeds}[a.cmd]()
+     'submit_s06_lastfe': lambda: submit_lastfe(6, 512), 'submit_seeds': lambda: submit_seeds(only=a.name)}[a.cmd]()
