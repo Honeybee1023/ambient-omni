@@ -104,8 +104,9 @@ N_SNAP=$(ls "$RUNDIR"/network-snapshot-*.pkl 2>/dev/null | grep -v 'snapshot-000
 echo "=== $NAME scored $DONE_ALL of $N_SNAP snapshots; training at ${LAST:-0} of $FINAL kimg | $(date) ==="
 if [ -n "$DEFERRED" ]; then
     echo "earlier snapshots handed to a follow-up job:$DEFERRED"
-    PART=sched_mit_sloan_gpu_r8   # runs listed in preempt_only.txt (pareto_afhq.py) stay on mit_preemptable
-    grep -qx "$NAME" "${AMBIENT_BASE}/generated/pareto/preempt_only.txt" 2>/dev/null && PART="mit_preemptable --requeue"
+    PART=sched_mit_sloan_gpu_r8   # gap-filler runs (generated/pareto/filler.txt, see pareto_afhq.py) may go anywhere
+    grep -qx "$NAME" "${AMBIENT_BASE}/generated/pareto/filler.txt" 2>/dev/null \
+        && PART="sched_mit_sloan_gpu_r8,mit_normal_gpu,mit_preemptable --requeue --nice=1000"
     CURVE_EVAL_KIMGS="${DEFERRED# }" CURVE_EVAL_DEFER=0 sbatch --nice=500 \
         --exclude='node[3006,4004,4007-4008,5003-5005,5101,5103-5104,5106,5202-5204],node5801-c1,node5802-c1' \
         -p $PART --gres=gpu:1 -c 8 --mem=96G -t 06:00:00 -J "ceval_${NAME}" \

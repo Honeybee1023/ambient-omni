@@ -164,19 +164,21 @@ def init():
     print('created', STATE, len(xs), 'schedules')
 
 
-def preempt_only():
-    """Runs that train and score ONLY on mit_preemptable (user, 2026-10-19: extra AFHQ seeds may use only compute that
-    never delays CelebA, whose jobs do not use that partition). One run name per line."""
-    p = f'{AMBIENT_BASE}/generated/pareto/preempt_only.txt'
+def fillers():
+    """Gap-filler runs (user, 2026-10-19): optional extra seeds that may use only GPUs nobody else needs. They go in at
+    the lowest priority, may be shrunk to fit a gap (--time-min), and a Mac-side manager (ops/filler.sh) holds them
+    whenever one of our other jobs is waiting, so they never delay real work. One run name per line."""
+    p = f'{AMBIENT_BASE}/generated/pareto/filler.txt'
     return set(open(p).read().split()) if os.path.exists(p) else set()
 
 
 def sbatch(args):
     """sbatch; if ou_sloan_gpu's per-user submit limit (QOS, 24 queued) is hit, retry without that partition."""
-    if re.sub(r'^(ceval|losscurve)_', '', args[args.index('-J') + 1]) in preempt_only():
-        args = list(args); args[args.index('-p') + 1] = 'mit_preemptable'
-        if '--requeue' not in args:
-            args.insert(0, '--requeue')                         # a preempted job goes back in the queue and resumes
+    if re.sub(r'^(ceval|losscurve)_', '', args[args.index('-J') + 1]) in fillers():
+        args = list(args); args[args.index('-p') + 1] = 'ou_sloan_gpu,sched_mit_sloan_gpu_r8,mit_normal_gpu,mit_preemptable'
+        args = ['--requeue', '--nice=1000'] + args               # resumes after a hold/requeue or preemption
+        if '--signal=B:USR1@600' in args:                           # training saves and requeues itself at its limit,
+            args = ['--time-min=00:45:00'] + args                  # so Slurm may shrink it to fit a gap (scoring may not)
     if any(x.startswith('--dependency') for x in args):     # a job only waiting must not hold one of the 24 slots;
         args = list(args); i = args.index('-p')                 # sloan_slots() adds ou_sloan_gpu back once it is ready
         args[i + 1] = ','.join(p for p in args[i + 1].split(',') if p != 'ou_sloan_gpu')
