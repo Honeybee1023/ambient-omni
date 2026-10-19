@@ -299,6 +299,9 @@ def sloan_slots(caps=(('ou_sloan_gpu', 24), ('mit_normal_gpu', 60))):
         used = sum(part in r[1].split(',') for r in rows)
         want = [r for r in rows if r[2] == 'PENDING' and r[3] not in ('Dependency', 'JobHeldUser') and part not in r[1].split(',')
                 and 'gpu' in r[5] and not any(t in r[5] for t in ('a100', 'l40s', 'a40', 'rtx'))]
+        po = set(open(f'{AMBIENT_BASE}/generated/pareto/preempt_only.txt').read().split()) \
+            if os.path.exists(f'{AMBIENT_BASE}/generated/pareto/preempt_only.txt') else set()
+        want = [r for r in want if r[6].removeprefix('ceval_').removeprefix('losscurve_') not in po]
         for r in sorted(want, key=lambda r: -int(r[4]))[:max(0, limit - used)]:
             res = subprocess.run(['scontrol', 'update', f'JobId={r[0]}', f'Partition={part},{r[1]}'],
                                  capture_output=True, text=True)

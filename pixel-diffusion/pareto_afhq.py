@@ -22,7 +22,7 @@ Every short job calls topup when it ends, so the study drives itself.
 import os as _os
 AMBIENT_BASE = _os.environ.get("AMBIENT_BASE") or "/orcd/scratch/orcd/006/honjar"
 
-import argparse, fcntl, json, os, shutil, subprocess, sys, time
+import argparse, fcntl, json, os, re, shutil, subprocess, sys, time
 
 import numpy as np
 
@@ -164,8 +164,19 @@ def init():
     print('created', STATE, len(xs), 'schedules')
 
 
+def preempt_only():
+    """Runs that train and score ONLY on mit_preemptable (user, 2026-10-19: extra AFHQ seeds may use only compute that
+    never delays CelebA, whose jobs do not use that partition). One run name per line."""
+    p = f'{AMBIENT_BASE}/generated/pareto/preempt_only.txt'
+    return set(open(p).read().split()) if os.path.exists(p) else set()
+
+
 def sbatch(args):
     """sbatch; if ou_sloan_gpu's per-user submit limit (QOS, 24 queued) is hit, retry without that partition."""
+    if re.sub(r'^(ceval|losscurve)_', '', args[args.index('-J') + 1]) in preempt_only():
+        args = list(args); args[args.index('-p') + 1] = 'mit_preemptable'
+        if '--requeue' not in args:
+            args.insert(0, '--requeue')                         # a preempted job goes back in the queue and resumes
     if any(x.startswith('--dependency') for x in args):     # a job only waiting must not hold one of the 24 slots;
         args = list(args); i = args.index('-p')                 # sloan_slots() adds ou_sloan_gpu back once it is ready
         args[i + 1] = ','.join(p for p in args[i + 1].split(',') if p != 'ou_sloan_gpu')
