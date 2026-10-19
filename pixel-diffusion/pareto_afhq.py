@@ -380,11 +380,11 @@ def submit_oracle():
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument('--name'); ap.add_argument('--after')
+    ap.add_argument('--name'); ap.add_argument('--after'); ap.add_argument('--seeds', default='1,2')
     ap.add_argument('cmd', choices=['followups', 'build', 'init', 'topup', 'status', 'build_diag', 'submit_diag', 'submit_finetune', 'submit_oracle', 'submit_s02_lastjump', 'submit_s06_lastfe', 'submit_seeds'])
     a = ap.parse_args()
     if a.cmd == 'followups':
         followups(a.name, a.after); raise SystemExit
     {'build': build, 'init': init, 'topup': topup, 'status': status, 'build_diag': build_diag,
      'submit_diag': submit_diag, 'submit_finetune': submit_finetune, 'submit_oracle': submit_oracle, 'submit_s02_lastjump': submit_s02_lastjump,
-     'submit_s06_lastfe': lambda: submit_lastfe(6, 512), 'submit_seeds': lambda: submit_seeds(only=a.name)}[a.cmd]()
+     'submit_s06_lastfe': lambda: submit_lastfe(6, 512), 'submit_seeds': lambda: submit_seeds(tuple(int(x) for x in a.seeds.split(',')), only=a.name)}[a.cmd]()
