@@ -57,7 +57,7 @@ NICE_SHORT, NICE_PROP = 10, 20
 NICE_FIRST, NICE_SEED, NICE_PICK = 0, 4, 8
 FIRST = (4, 7)
 G2 = (f'{X} -p ou_sloan_gpu,sched_mit_sloan_gpu_r8,mit_normal_gpu,mit_preemptable --gres=gpu:2 -c 16 --mem=128G '
-      f'--requeue --signal=B:USR1@2700 --time-min=00:45:00').split()  # may be shrunk to fit an idle gap
+      f'--requeue --signal=B:USR1@2700').split()
 G1 = f'{X} -p sched_mit_sloan_gpu_r8,ou_sloan_gpu,mit_normal_gpu --gres=gpu:1 -c 8 --mem=96G -t 06:00:00'.split()
 # jobs waiting on a dependency list only the Sloan A100 partition (no per-user submit cap): mit_normal_gpu allows 64
 # queued jobs per user and every scoring job counted against it; sloan_slots() widens them once they are ready
