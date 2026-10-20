@@ -93,7 +93,26 @@ nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
 # Self-requeue before a partition time limit (submit with --requeue --signal=B:USR1@600); resumes from the newest dump.
 # With sbatch --wrap, use --wrap "exec bash run_curve.sh ..." -- B:USR1 goes only to the batch shell, so a plain
 # "bash run_curve.sh" leaves sh (no trap) as that shell and the job just dies at the limit.
-trap 'echo "time limit near: requeueing $SLURM_JOB_ID"; kill $TRAIN_PID 2>/dev/null; scontrol requeue $SLURM_JOB_ID; exit 0' USR1
+# At the signal, training continues until the next state dump has been written (snapshot first, then state), and only
+# then stops, so a stop loses no training; it gives up 2 min before the job's end time. A larger --signal lead (e.g.
+# B:USR1@2700) lets a job whose limit was shrunk to fit an idle gap (--time-min) always reach one more dump.
+on_limit() {
+    local prev cur end sz
+    prev=$(ls -1 "$RUNDIR"/training-state-*.pt 2>/dev/null | sort -V | tail -1)
+    end=$(( $(date -d "$(squeue -h -j "$SLURM_JOB_ID" -o %e)" +%s) - 120 ))
+    echo "time limit near: waiting for the state dump after ${prev:-none} (until $(date -d @$end +%T)), then requeueing $SLURM_JOB_ID"
+    while kill -0 $TRAIN_PID 2>/dev/null && [ "$(date +%s)" -lt "$end" ]; do
+        cur=$(ls -1 "$RUNDIR"/training-state-*.pt 2>/dev/null | sort -V | tail -1)
+        if [ -n "$cur" ] && [ "$cur" != "$prev" ]; then
+            sz=-1; while [ "$(stat -c %s "$cur")" != "$sz" ]; do sz=$(stat -c %s "$cur"); sleep 15; done
+            echo "state dump $cur written"; break
+        fi
+        sleep 10
+    done
+    if ! kill -0 $TRAIN_PID 2>/dev/null; then wait $TRAIN_PID; rc=$?; echo "=== curve $NAME exit $rc | $(date) ==="; exit $rc; fi
+    kill $TRAIN_PID 2>/dev/null; scontrol requeue "$SLURM_JOB_ID"; exit 0
+}
+trap on_limit USR1
 python -m torch.distributed.run --standalone --nproc_per_node="$NGPU" train.py \
     --outdir="$RUNDIR" --nosubdir --data="$DATA" --expr_id="curve_${NAME}" \
     --cond=0 --arch=ddpmpp --precond=edm --cres=1,2,2,2 \
