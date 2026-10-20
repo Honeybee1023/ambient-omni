@@ -39,4 +39,7 @@ for name in [a for a in sys.argv[2:] if not a.startswith('--')]:
                 P.env({'CURVE_FINAL_KIMG': str(P.T_KIMG), 'CURVE_EVAL_KIMGS': str(k), 'CURVE_EVAL_N': '50000',
                        'CURVE_EVAL_DEFER': '0'}) + f'exec bash {P.REPO}/run_curve_eval.sh {name}']
         out = 'dry' if DRY else subprocess.run(['sbatch', '--parsable'] + args, capture_output=True, text=True)
+        if not DRY and out.returncode and 'QOSMaxSubmitJob' in out.stderr:   # ou_sloan_gpu takes 24 queued jobs per user
+            args[args.index('-p') + 1] = PARTS.replace('ou_sloan_gpu,', '')
+            out = subprocess.run(['sbatch', '--parsable'] + args, capture_output=True, text=True)
         print(name, f'k{k}', out if DRY else (out.stdout.strip() or out.stderr.strip()))
