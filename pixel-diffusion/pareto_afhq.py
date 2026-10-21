@@ -178,7 +178,9 @@ def sbatch(args):
         args = list(args); args[args.index('-p') + 1] = 'ou_sloan_gpu,sched_mit_sloan_gpu_r8,mit_normal_gpu,mit_preemptable'
         args = ['--requeue', '--nice=1000'] + args               # resumes after a hold/requeue or preemption
         if '--signal=B:USR1@2700' in args:                        # training may be shrunk to fit a gap; the shrunk limit
-            args = ['--time-min=00:45:00'] + args                  # stays after a requeue, so only optional runs get this
+            args = ['--time-min=01:45:00'] + args                  # stays after a requeue, so only optional runs get this.
+            # At least the 45-min signal lead + one 512-kimg dump interval + margin: a 45-min limit signals at the start
+            # and requeues before any dump, losing every piece (afhq_ambo_seed4, 2026-10-21).
     if any(x.startswith('--dependency') for x in args):     # a job only waiting must not hold one of the 24 slots;
         args = list(args); i = args.index('-p')                 # sloan_slots() adds ou_sloan_gpu back once it is ready
         args[i + 1] = ','.join(p for p in args[i + 1].split(',') if p != 'ou_sloan_gpu')
