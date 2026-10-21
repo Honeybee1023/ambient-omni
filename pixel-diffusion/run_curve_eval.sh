@@ -107,11 +107,13 @@ if [ -n "$DEFERRED" ]; then
     PART=sched_mit_sloan_gpu_r8   # gap-filler runs (generated/pareto/filler.txt, see pareto_afhq.py) may go anywhere
     grep -qx "$NAME" "${AMBIENT_BASE}/generated/pareto/filler.txt" 2>/dev/null \
         && PART="sched_mit_sloan_gpu_r8,mit_normal_gpu,mit_preemptable --requeue --nice=1000"
-    CURVE_EVAL_KIMGS="${DEFERRED# }" CURVE_EVAL_DEFER=0 sbatch --nice=500 \
+    follow() { CURVE_EVAL_KIMGS="${DEFERRED# }" CURVE_EVAL_DEFER=0 sbatch --nice=500 \
         --exclude='node[3006,4004,4007-4008,5003-5005,5101,5103-5104,5106,5202-5204],node5801-c1,node5802-c1' \
-        -p $PART --gres=gpu:1 -c 8 --mem=96G -t 06:00:00 -J "ceval_${NAME}" \
+        -p $1 --gres=gpu:1 -c 8 --mem=96G -t 06:00:00 -J "ceval_${NAME}" \
         -o "${AMBIENT_BASE}/train_logs/curve/eval_${NAME}-%j.out" \
-        --export=ALL --wrap "exec bash ${AMBIENT_BASE}/ambient-omni/pixel-diffusion/run_curve_eval.sh ${NAME}"
+        --export=ALL --wrap "exec bash ${AMBIENT_BASE}/ambient-omni/pixel-diffusion/run_curve_eval.sh ${NAME}"; }
+    # ou_sloan_gpu first (idle H100/H200 stranded these jobs, 2026-10-21); without it once its 24-job cap is reached
+    follow "ou_sloan_gpu,$PART" || follow "$PART"
     exit 0
 fi
 if [ "${CURVE_EVAL_RESUBMIT:-1}" = 1 ] && { [ "${LAST:-0}" -lt "$FINAL" ] || [ "$DONE_ALL" -lt "$N_SNAP" ]; } && [ -n "${SLURM_JOB_ID:-}" ]; then
