@@ -34,7 +34,7 @@ for name in [a for a in sys.argv[2:] if not a.startswith('--')]:
         jn = f'c50k_{name}_k{k}'
         if os.path.exists(f'{CURVE}/{name}/k{k:06d}_n50k.json') or jn in queued:
             print(f'{name} k{k}: done or queued'); continue
-        args = [P.X, '-p', PARTS, '--gres=gpu:1', '-c', '8', '--mem=96G', '-t', '04:00:00', '--time-min=02:30:00',
+        args = [P.X, '-p', PARTS, '--gres=gpu:1', '-c', '8', '--mem=96G', '-t', '06:00:00', '--time-min=04:30:00',  # CelebA 50k on an A100 needs >4 h (2026-10-22)
                 '--nice=600', '--requeue', '-J', jn, '-o', f'{P.LOG}/{jn}-%j.out', '--wrap',
                 P.env({'CURVE_FINAL_KIMG': str(P.T_KIMG), 'CURVE_EVAL_KIMGS': str(k), 'CURVE_EVAL_N': '50000',
                        'CURVE_EVAL_DEFER': '0'}) + f'exec bash {P.REPO}/run_curve_eval.sh {name}']
