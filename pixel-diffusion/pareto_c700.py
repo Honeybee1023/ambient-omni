@@ -350,6 +350,8 @@ def topup():
                 q = st['full'].get(str(i))
                 if q is not None and not str(q.get('job', 'ERR')).startswith('ERR'):
                     continue
+                if st.get('hold_new_T'):   # state flag: a new pick waits for the user before its run to T
+                    print('new pick held (hold_new_T), not run to T:', key, full_name(i)); continue
                 t, ev = submit_full(st, i, None, nice=nice)
                 st['full'][str(i)] = {'name': full_name(i), 'job': t, 'eval_job': ev, 'submitted': time.strftime('%F %T'),
                                       **tag}
