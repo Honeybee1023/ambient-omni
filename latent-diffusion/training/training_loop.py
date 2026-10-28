@@ -27,6 +27,15 @@ import zipfile
 from calculate_metrics_quality import load_stats
 from huggingface_hub import hf_hub_download
 from safetensors import safe_open
+import signal
+from training import buckets as bk
+
+# Slurm sends SIGUSR1 (--signal=B:USR1@<sec>) or SIGTERM before a time limit or preemption. The handler only sets a
+# flag; the loop agrees on it across ranks, saves a training-state checkpoint and exits with code 3 (= requeue me).
+_STOP_REQUESTED = False
+def _request_stop(signum, frame):
+    global _STOP_REQUESTED
+    _STOP_REQUESTED = True
 #----------------------------------------------------------------------------
 # Uncertainty-based loss function (Equations 14,15,16,21) proposed in the
 # paper "Analyzing and Improving the Training Dynamics of Diffusion Models".
@@ -96,8 +105,17 @@ def training_loop(
     bad_data_percentage = 0.8, # Percentage of bad data
     bad_data_sigma_min = 0.2, # Sigma_min assignec to bad data
     use_ambient_crops = True, # Wether to use crops to increase low diffusion time data
+
+    # Per-bucket noise floors (training/buckets.py). When bucket_path is set, Ambient-o's CLIP-IQA annotation path
+    # above is not used at all: the bucket file defines the clean set (bucket 0) and the bad buckets 1..K.
+    bucket_path         = None,     # npz with bucket[i] per dataset index (+ optional subset_<name> masks)
+    bucket_schedule     = None,     # JSON spec: per_bucket step functions or fixed floors (see training/buckets.py)
+    schedule_horizon_nimg = None,   # run length the per_bucket fractions refer to (None = total_nimg)
+    subset_name         = None,     # train only on bucket file mask subset_<name> (e.g. 'short' = the 1/10 data)
 ):
     # Initialize.
+    signal.signal(signal.SIGUSR1, _request_stop)
+    signal.signal(signal.SIGTERM, _request_stop)
     prev_status_time = time.time()
     misc.set_random_seed(seed, dist.get_rank())
     torch.backends.cudnn.benchmark = cudnn_benchmark
@@ -123,7 +141,27 @@ def training_loop(
 
     ## Annotations
     annotations = {}
-    if annotations_qualities_path is not None:
+    use_buckets = bucket_path is not None
+    if use_buckets and annotations_qualities_path is not None:
+        raise ValueError('give either bucket_path or annotations_qualities_path, not both')
+    if use_buckets:
+        bucket_of, subset_masks = bk.load_buckets(bucket_path, len(dataset_obj))
+        num_buckets = int(bucket_of.max())
+        subset_mask = None
+        if subset_name is not None:
+            if subset_name not in subset_masks:
+                raise ValueError(f'bucket file has no subset_{subset_name}; it has {sorted(subset_masks)}')
+            subset_mask = subset_masks[subset_name]
+        horizon = schedule_horizon_nimg or total_nimg
+        schedule = bk.BucketSchedule(bucket_schedule, num_buckets, P_mean=loss_kwargs['P_mean'],
+                                     P_std=loss_kwargs['P_std'], horizon_nimg=horizon)
+        used = bucket_of if subset_mask is None else bucket_of[subset_mask]
+        dist.print0(f'Buckets: {num_buckets} bad + clean | training images {len(used)} of {len(bucket_of)} | per bucket '
+                    + ', '.join(f'{b}={int((used == b).sum())}' for b in range(num_buckets + 1)))
+        dist.print0(f'Bucket schedule: {json.dumps(schedule.spec)} | horizon {horizon // 1000} kimg')
+        for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
+            dist.print0(f'  floors at {frac:.2f}: ' + ', '.join(f'{x:.3g}' for x in schedule.floors(frac * horizon)))
+    elif annotations_qualities_path is not None:
         if annotations_qualities_path == "adrianrm/ambient-o-clip-iqa-patches-imagenet":
             annotations_qualities_path = hf_hub_download(repo_id='adrianrm/ambient-o-clip-iqa-patches-imagenet', filename="clip_iqa_patch_average.safetensors", repo_type="dataset")
             annotations_qualities = {}
@@ -211,7 +249,24 @@ def training_loop(
     dist.print0()
 
     # Main training loop.
-    dataset_sampler = misc.InfiniteSampler(dataset=dataset_obj, rank=dist.get_rank(), num_replicas=dist.get_world_size(), seed=seed, start_idx=state.cur_nimg)
+    if use_buckets:
+        # Resume the walk where each rank left it (positions saved with the training state). With a different GPU
+        # count the saved positions cannot be split exactly; continue from the slowest rank instead.
+        saved = state.get('sampler_pos')
+        if saved is not None and len(saved) == dist.get_world_size():
+            start_pos = int(saved[dist.get_rank()]) + dist.get_world_size()
+        elif saved is not None:
+            start_pos = int(min(saved)) + dist.get_world_size() + dist.get_rank()
+            dist.print0(f'Resuming with {dist.get_world_size()} GPUs from a {len(saved)}-GPU checkpoint: walk restarts at {min(saved)}')
+        else:
+            start_pos = None
+        dataset_sampler = bk.BucketSampler(len(dataset_obj), bucket_of, schedule, rank=dist.get_rank(),
+                                           num_replicas=dist.get_world_size(), seed=seed, P_mean=loss_kwargs['P_mean'],
+                                           P_std=loss_kwargs['P_std'], subset=subset_mask, start_pos=start_pos,
+                                           cur_nimg=state.cur_nimg)
+        last_walk_pos = -1 if start_pos is None else start_pos - dist.get_world_size()
+    else:
+        dataset_sampler = misc.InfiniteSampler(dataset=dataset_obj, rank=dist.get_rank(), num_replicas=dist.get_world_size(), seed=seed, start_idx=state.cur_nimg)
     dataset_iterator = iter(dnnlib.util.construct_class_by_name(dataset=dataset_obj, sampler=dataset_sampler, batch_size=batch_gpu, **data_loader_kwargs))
 
     prev_status_nimg = state.cur_nimg
@@ -279,10 +334,31 @@ def training_loop(
                 if dist.get_rank() == 0:
                     wandb.save(os.path.join(run_dir, fname))
 
+        # Stop requested by Slurm (time limit / preemption)? All ranks must agree before anyone saves.
+        stop_flag = torch.tensor([1.0 if _STOP_REQUESTED else 0.0], device=device)
+        if dist.get_world_size() > 1:
+            torch.distributed.all_reduce(stop_flag)
+        stop_now = bool(stop_flag.item() > 0) and not done
+
         # Save state checkpoint.
-        if checkpoint_nimg is not None and (done or state.cur_nimg % checkpoint_nimg == 0) and state.cur_nimg != start_nimg:
+        if (checkpoint_nimg is not None and (done or state.cur_nimg % checkpoint_nimg == 0) and state.cur_nimg != start_nimg) or (stop_now and state.cur_nimg != start_nimg):
+            if use_buckets:
+                pos = torch.tensor([last_walk_pos], dtype=torch.int64, device=device)
+                allpos = [torch.zeros_like(pos) for _ in range(dist.get_world_size())]
+                if dist.get_world_size() > 1:
+                    torch.distributed.all_gather(allpos, pos)
+                else:
+                    allpos = [pos]
+                state.sampler_pos = [int(x.item()) for x in allpos]
             checkpoint.save(os.path.join(run_dir, f'training-state-{state.cur_nimg//1000:07d}.pt'))
             misc.check_ddp_consistency(net)
+        if stop_now:
+            dist.print0(f'Stop requested at {state.cur_nimg // 1000} kimg: state saved, exiting with code 3 for requeue.')
+            if dist.get_rank() == 0:
+                open(os.path.join(run_dir, 'REQUEUE'), 'w').write(f'{state.cur_nimg}\n')   # read by scripts/run_train.sh
+            if dist.get_world_size() > 1:
+                torch.distributed.barrier()
+            raise SystemExit(3)
 
         # Done?
         if done:
@@ -299,11 +375,25 @@ def training_loop(
                 labels = dataset_item['label']
 
                 encoded_latents = encoder.encode_latents(latents.to(device))
-                sigma_tn = torch.tensor([dataset_obj.annotations.get(filename, (0.0, 0.0))[0] for filename in dataset_item['filename']], device=device)
-                
-                # Get sigma_t
-                batch_sampled_sigmas = [dataset_sampler.sampled_sigmas[filename] for filename in dataset_item['filename']]
-                sigma_t = torch.tensor(batch_sampled_sigmas, device=device)
+                if use_buckets:
+                    # the (sigma, floor) pair the sampler decided for each sample, in yield order
+                    dec = [dataset_sampler.decided.popleft() for _ in range(len(dataset_item['raw_idx']))]
+                    got = [int(x) for x in dataset_item['raw_idx']]
+                    if [d[0] for d in dec] != got:
+                        raise RuntimeError('sampler/loader order mismatch: decided indices do not match the batch')
+                    sigma_t = torch.tensor([d[1] for d in dec], device=device, dtype=torch.float32)
+                    sigma_tn = torch.tensor([d[2] for d in dec], device=device, dtype=torch.float32)
+                    last_walk_pos = dec[-1][3]
+                    b = torch.as_tensor(bucket_of[got].astype(np.int64))
+                    for k in range(num_buckets + 1):
+                        training_stats.report(f'Buckets/share_b{k}', (b == k).float())
+                    training_stats.report('Buckets/ambient_share', (sigma_tn > 0).float())
+                else:
+                    sigma_tn = torch.tensor([dataset_obj.annotations.get(filename, (0.0, 0.0))[0] for filename in dataset_item['filename']], device=device)
+
+                    # Get sigma_t
+                    batch_sampled_sigmas = [dataset_sampler.sampled_sigmas[filename] for filename in dataset_item['filename']]
+                    sigma_t = torch.tensor(batch_sampled_sigmas, device=device)
 
                 # this avoids negative square roots.
                 sigma_tn = torch.where(sigma_t <= sigma_tn, torch.zeros_like(sigma_tn), sigma_tn)
@@ -351,6 +441,8 @@ def training_loop(
 
         # Update EMA and training state.
         state.cur_nimg += batch_size
+        if use_buckets:
+            dataset_sampler.cur_nimg = state.cur_nimg
         if ema is not None:
             ema.update(cur_nimg=state.cur_nimg, batch_size=batch_size)
         cumulative_training_time += time.time() - batch_start_time

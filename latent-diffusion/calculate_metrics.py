@@ -21,6 +21,10 @@ from torch_utils import misc
 from training import dataset
 import generate_images
 
+# DINOv2 code pinned to the last commit before its June 2025 switch to Python >= 3.10 syntax (same weights; pinning
+# also keeps FD-DINOv2 identical across clusters). Was 'main'.
+DINOV2_REF = '4d83ffd4f4b39df112cef7ed7833de7ebf3a202e'
+
 #----------------------------------------------------------------------------
 # Abstract base class for feature detectors.
 
@@ -56,7 +60,7 @@ class DINOv2Detector(Detector):
         import warnings
         warnings.filterwarnings('ignore', 'xFormers is not available')
         torch.hub.set_dir(dnnlib.make_cache_dir_path('torch_hub'))
-        self.model = torch.hub.load('facebookresearch/dinov2:main', 'dinov2_vitl14', trust_repo=True, verbose=False, skip_validation=True)
+        self.model = torch.hub.load(f'facebookresearch/dinov2:{DINOV2_REF}', 'dinov2_vitl14', trust_repo=True, verbose=False, skip_validation=True)
         self.model.eval().requires_grad_(False)
 
     def __call__(self, x):
@@ -217,6 +221,7 @@ def calculate_stats_for_files(
     num_workers     = 2,    # How many subprocesses to use for data loading.
     prefetch_factor = 2,    # Number of images loaded in advance by each worker.
     verbose         = True, # Enable status prints?
+    subset          = None, # 'file.npz:key' -> use only the images whose boolean mask entry is True.
     **stats_kwargs,         # Arguments for calculate_stats_for_iterable().
 ):
     # Rank 0 goes first.
@@ -227,6 +232,14 @@ def calculate_stats_for_files(
     if verbose:
         dist.print0(f'Loading images from {image_path} ...')
     dataset_obj = dataset.ImageFolderDataset(path=image_path, max_size=num_images, random_seed=seed)
+    if subset is not None:
+        npz, key = subset.rsplit(':', 1)
+        mask = np.load(npz)[key].astype(bool)
+        if num_images is not None or len(mask) != len(dataset_obj):
+            raise click.ClickException(f'--subset needs the full dataset ({len(dataset_obj)} images) and a mask of the same length ({len(mask)})')
+        dataset_obj._raw_idx = np.flatnonzero(mask).astype(np.int64)
+        if verbose:
+            dist.print0(f'Subset {subset}: {len(dataset_obj)} images')
     if num_images is not None and len(dataset_obj) < num_images:
         raise click.ClickException(f'Found {len(dataset_obj)} images, but expected at least {num_images}')
     if len(dataset_obj) < 2:
@@ -372,6 +385,7 @@ def gen(net, ref_path, metrics, num_images, seed, **opts):
 @click.option('--metrics',                  help='List of metrics to compute', metavar='LIST',          type=parse_metric_list, default='fid,fd_dinov2', show_default=True)
 @click.option('--batch', 'max_batch_size',  help='Maximum batch size', metavar='INT',                   type=click.IntRange(min=1), default=64, show_default=True)
 @click.option('--workers', 'num_workers',   help='Subprocesses to use for data loading', metavar='INT', type=click.IntRange(min=0), default=2, show_default=True)
+@click.option('--subset',                   help='Only images in this mask: NPZ:KEY (e.g. buckets.npz:heldout_clean_short)', type=str, default=None)
 
 def ref(**opts):
     """Calculate dataset reference statistics for 'calc' and 'gen'."""

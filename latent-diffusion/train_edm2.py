@@ -86,6 +86,8 @@ def setup_training_config(preset='edm2-img512-s', **opts):
     c.network_kwargs = dnnlib.EasyDict(class_name='training.networks_edm2.Precond', model_channels=opts.channels, dropout=opts.dropout)
     c.loss_kwargs = dnnlib.EasyDict(class_name='training.training_loop.EDM2Loss', P_mean=opts.P_mean, P_std=opts.P_std)
     c.lr_kwargs = dnnlib.EasyDict(func_name='training.training_loop.learning_rate_schedule', ref_lr=opts.lr, ref_batches=opts.decay)
+    if opts.get('rampup_mimg') is not None:
+        c.lr_kwargs.rampup_Mimg = opts.rampup_mimg
 
     # Performance-related options.
     c.batch_gpu = opts.get('batch_gpu', 0) or None
@@ -141,12 +143,9 @@ def launch_training(run_dir, c):
 def parse_nimg(s):
     if isinstance(s, int):
         return s
-    if s.endswith('Ki'):
-        return int(s[:-2]) << 10
-    if s.endswith('Mi'):
-        return int(s[:-2]) << 20
-    if s.endswith('Gi'):
-        return int(s[:-2]) << 30
+    for suffix, shift in (('Ki', 10), ('Mi', 20), ('Gi', 30)):
+        if s.endswith(suffix):
+            return round(float(s[:-2]) * (1 << shift)) # decimals allowed, e.g. 204.8Mi = 1/10 of 2048Mi
     return int(s)
 
 #----------------------------------------------------------------------------
@@ -194,6 +193,13 @@ def parse_nimg(s):
 @click.option('--bad_data_sigma_min', help='Sigma_min given to "bad" data according to global quality', type=float, default=0.2, show_default=True)
 @click.option('--use_ambient_crops', help='Wether to use crops to increase low diffusion time data', metavar='BOOL', type=bool, default=True, show_default=True)
 
+# Per-bucket noise floors (training/buckets.py)
+@click.option('--bucket_path',      help='npz bucket file (scripts/imagenet_buckets.py); replaces the CLIP-IQA annotations', type=str, default=None)
+@click.option('--bucket_schedule',  help='Bucket schedule JSON, or @path to a JSON file', type=str, default=None)
+@click.option('--schedule_horizon', help='Run length the schedule fractions refer to (default: --duration)', metavar='NIMG', type=parse_nimg, default=None)
+@click.option('--subset',           help='Train only on the bucket file subset_<name> mask', type=str, default=None)
+@click.option('--rampup_mimg',      help='LR warm-up length in Mimg (EDM2 default 10)', type=click.FloatRange(min=0), default=None)
+
 def cmdline(outdir, dry_run, **opts):
     """Train diffusion models according to the EDM2 recipe from the paper
     "Analyzing and Improving the Training Dynamics of Diffusion Models".
@@ -232,6 +238,17 @@ def cmdline(outdir, dry_run, **opts):
     c.bad_data_percentage = opts['bad_data_percentage']
     c.bad_data_sigma_min = opts['bad_data_sigma_min']
     c.use_ambient_crops = opts['use_ambient_crops']
+    if opts['bucket_path'] is not None:
+        sched = opts['bucket_schedule']
+        if sched is None:
+            raise click.ClickException('--bucket_path needs --bucket_schedule')
+        if sched.startswith('@'):
+            with open(sched[1:]) as f:
+                sched = f.read()
+        c.bucket_path = opts['bucket_path']
+        c.bucket_schedule = json.loads(sched)
+        c.schedule_horizon_nimg = opts['schedule_horizon']
+        c.subset_name = opts['subset']
     
     print_training_config(run_dir=outdir, c=c)
     if dry_run:

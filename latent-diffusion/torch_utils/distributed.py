@@ -104,7 +104,9 @@ class CheckpointIO:
             else:
                 raise ValueError(f'Invalid state object of type {type(obj).__name__}')
         if get_rank() == 0:
-            torch.save(data, pt_path)
+            # write then rename, so a job killed mid-save never leaves a truncated "latest" checkpoint behind
+            torch.save(data, pt_path + '.tmp')
+            os.replace(pt_path + '.tmp', pt_path)
         if verbose:
             print0('done')
 
