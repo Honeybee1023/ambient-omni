@@ -73,6 +73,19 @@ class StandardRGBEncoder(Encoder):
         return (x.to(torch.float32) * 127.5 + 128).clip(0, 255).to(torch.uint8)
 
 #----------------------------------------------------------------------------
+# The SD VAE has a few very large activations; with TF32 convolutions (PyTorch's default) some latent means come out
+# wrong by up to ~10 on Hopper GPUs (checked on 2000 ImageNet images: TF32 off agrees with an L40S encode to 0.5).
+# The VAE always runs in full fp32, whatever the caller's TF32 settings.
+
+class _no_tf32:
+    def __enter__(self):
+        self.saved = (torch.backends.cudnn.allow_tf32, torch.backends.cuda.matmul.allow_tf32)
+        torch.backends.cudnn.allow_tf32 = False
+        torch.backends.cuda.matmul.allow_tf32 = False
+    def __exit__(self, *exc):
+        torch.backends.cudnn.allow_tf32, torch.backends.cuda.matmul.allow_tf32 = self.saved
+
+#----------------------------------------------------------------------------
 # Pre-trained VAE encoder from Stability AI.
 
 @persistence.persistent_class
@@ -103,11 +116,13 @@ class StabilityVAEEncoder(Encoder):
         return dict(super().__getstate__(), _vae=None) # do not pickle the vae
 
     def _run_vae_encoder(self, x):
-        d = self._vae.encode(x)['latent_dist']
-        return torch.cat([d.mean, d.std], dim=1)
+        with _no_tf32():
+            d = self._vae.encode(x)['latent_dist']
+            return torch.cat([d.mean, d.std], dim=1)
 
     def _run_vae_decoder(self, x):
-        return self._vae.decode(x)['sample']
+        with _no_tf32():
+            return self._vae.decode(x)['sample']
 
     def encode_pixels(self, x): # raw pixels => raw latents
         self.init(x.device)
