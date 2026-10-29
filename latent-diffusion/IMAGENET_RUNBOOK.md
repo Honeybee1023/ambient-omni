@@ -29,6 +29,12 @@ Model: EDM2 `edm2-img512-xs`, class-conditional, SD-VAE latents, batch 2048, lr 
 
 One short search run on 2 GB200 nodes takes ≈ 8 h.
 
+These speeds need the data on node-local disk. Read in place from a shared filesystem (Lustre), the 168 GB latent zip
+costs ~5 ms per image and halves the speed (0.26 s per 1000 images on 8 GB200); 2 loader processes per GPU then deliver
+~400 images/s against the ~2000 needed. `scripts/run_train.sh` copies `--data` to `$STAGE_DIR` first (≈ 4 min) and
+passes `--workers=$DATA_WORKERS`: set `STAGE_DIR=/tmp/<dir> DATA_WORKERS=8` (local copy + 8 processes: ~7900 images/s
+per GPU).
+
 ## 1. Environment
 
 Two setups have passed the smoke test (section 7):

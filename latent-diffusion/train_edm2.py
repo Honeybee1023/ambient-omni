@@ -94,6 +94,9 @@ def setup_training_config(preset='edm2-img512-s', **opts):
     c.network_kwargs.use_fp16 = opts.get('fp16', True)
     c.loss_scaling = opts.get('ls', 1)
     c.cudnn_benchmark = opts.get('bench', True)
+    if opts.get('workers') is not None:
+        c.data_loader_kwargs = dnnlib.EasyDict(class_name='torch.utils.data.DataLoader', pin_memory=True,
+                                               num_workers=opts.workers, prefetch_factor=2)
 
     # I/O-related options.
     c.status_nimg = opts.get('status', 0) or None
@@ -173,6 +176,7 @@ def parse_nimg(s):
 @click.option('--batch-gpu',        help='Limit batch size per GPU', metavar='NIMG',            type=parse_nimg, default=0, show_default=True)
 @click.option('--fp16',             help='Enable mixed-precision training', metavar='BOOL',     type=bool, default=True, show_default=True)
 @click.option('--ls',               help='Loss scaling', metavar='FLOAT',                       type=click.FloatRange(min=0, min_open=True), default=1, show_default=True)
+@click.option('--workers',          help='Data loader processes per GPU (default 2)', metavar='INT', type=click.IntRange(min=1), default=None)
 @click.option('--bench',            help='Enable cuDNN benchmarking', metavar='BOOL',           type=bool, default=True, show_default=True)
 
 
