@@ -58,7 +58,18 @@ class EDM2Loss:
         ambient_factor = sigma_t ** 4 / ((sigma_t ** 2 - sigma_tn ** 2) ** 2)
         ambient_weight = edm_weight * ambient_factor
 
-        loss = (ambient_weight / logvar.exp()) * ((images_tn_pred - images_tn) ** 2) + logvar
+        # Fix for the ambient loss + EDM2 learned weight: EDM2 learns one weight per noise level, logvar ~ log of the
+        # mean loss there. Ambient images (sigma_tn > 0) carry an unpredictable part c that no model can reduce
+        # (target noise), which inflates that mean and so turns down the clean images at the same noise level.
+        # Here only clean images set logvar; each ambient image is divided by its own expected loss,
+        # exp(logvar) + c, with c = sigma_tn^2 (sigma^2 + sigma_data^2) / (sigma_data^2 (sigma^2 - sigma_tn^2)).
+        err = ambient_weight * ((images_tn_pred - images_tn) ** 2)
+        is_amb = (sigma_tn > 0).to(err.dtype)
+        c = sigma_tn ** 2 * (sigma_t ** 2 + self.sigma_data ** 2) / (self.sigma_data ** 2 * (sigma_t ** 2 - sigma_tn ** 2).clamp_min(1e-12))
+        c = c * is_amb
+        loss_clean = err / logvar.exp() + logvar
+        loss_amb = err / (logvar.detach().exp() + c)
+        loss = is_amb * loss_amb + (1 - is_amb) * loss_clean
         return loss
 
 #----------------------------------------------------------------------------
